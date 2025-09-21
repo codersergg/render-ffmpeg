@@ -47,7 +47,7 @@ jib {
 
     to {
         val dockerUser = System.getenv("DOCKER_HUB_USERNAME") ?: error("DOCKER_HUB_USERNAME not set")
-        image = "$dockerUser/speaknow-ffmpeg-concat:v$versionNumber"
+        image = "$dockerUser/render-ffmpeg:v$versionNumber"
 
         auth {
             username = dockerUser

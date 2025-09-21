@@ -1,1 +1,1 @@
-rootProject.name = "speaknow-ffmpeg-concat"
+rootProject.name = "render-ffmpeg"
