@@ -6,11 +6,14 @@ import kotlinx.serialization.Serializable
 data class CueItem(
     val idx: Int,
     val startMs: Long,
-    val endMs: Long
+    val endMs: Long,
+    val sentenceId: Long? = null
 )
 
 @Serializable
 data class EpisodeCuesPayload(
+    val episodeId: Long,
+    val lang: String,
     val items: List<CueItem>,
     val totalMs: Long
 )
@@ -62,5 +65,6 @@ data class VideoRenderRequest(
     val audioBitrateKbps: Int = 192,
     val overlayStyle: OverlayStyle = OverlayStyle(),
     val background: BackgroundSpec = BackgroundSpec(),
-    val returnAsFile: Boolean = true
+    val returnAsFile: Boolean = true,
+    val vertical: Boolean = false
 )
