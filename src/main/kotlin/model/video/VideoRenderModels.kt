@@ -60,6 +60,29 @@ data class BackgroundSpan(
 )
 
 @Serializable
+data class TransitionSpec(
+    val type: String = "fade",
+    val durationSec: Double = 0.40,
+    val centerOnBoundary: Boolean = true
+)
+
+@Serializable
+data class MotionSpec(
+    val enabled: Boolean = true,
+    val maxZoom: Double = 1.03,
+    val panFraction: Double = 0.02,
+    val minSpanSec: Double = 2.0,
+    val alternateAxis: Boolean = true,
+    val easing: String = "cosine"
+)
+
+@Serializable
+data class RenderEffects(
+    val transition: TransitionSpec = TransitionSpec(),
+    val motion: MotionSpec = MotionSpec()
+)
+
+@Serializable
 data class VideoRenderRequest(
     val audioUrl: String,
     val cuesUrl: String? = null,
@@ -73,5 +96,6 @@ data class VideoRenderRequest(
     val background: BackgroundSpec = BackgroundSpec(),
     val returnAsFile: Boolean = true,
     val vertical: Boolean = false,
-    val backgroundSpans: List<BackgroundSpan> = emptyList()
+    val backgroundSpans: List<BackgroundSpan> = emptyList(),
+    val effects: RenderEffects = RenderEffects()
 )

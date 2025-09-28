@@ -3,6 +3,7 @@ package com.codersergg
 import com.codersergg.model.video.CreateVideoJobRequest
 import com.codersergg.model.video.EpisodeCuesPayload
 import com.codersergg.model.video.JobStatus
+import com.codersergg.model.video.RenderEffects
 import com.codersergg.model.video.VideoJobResponse
 import com.codersergg.video.AssBuilder
 import com.codersergg.video.BackgroundSpansFfmpeg
@@ -53,14 +54,12 @@ fun Application.configureVideoJobsRouting() {
                 val jHttp = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()
 
                 try {
-                    // 1) AUDIO
                     val audioFile = File(tmpDir, "audio.mp3")
                     client.get(req.render.audioUrl).apply {
                         if (!status.isSuccess()) error("Audio download failed: $status")
                         bodyAsChannel().copyTo(audioFile.outputStream())
                     }
 
-                    // 2) CUES
                     val cues: EpisodeCuesPayload = req.render.cues ?: run {
                         val cuesUrl = requireNotNull(req.render.cuesUrl) { "cuesUrl is required when cues is null" }
                         val resp = client.get(cuesUrl) { accept(ContentType.Application.Json) }
@@ -72,10 +71,7 @@ fun Application.configureVideoJobsRouting() {
                         val txt = resp.bodyAsText()
                         val looksLikeJson = txt.firstOrNull() == '{'
                         if (!ct.contains("application/json") || !looksLikeJson) {
-                            log.error(
-                                "cuesUrl returned non-JSON. contentType='{}', head='{}'",
-                                ct, txt.take(200).replace("\n", " ")
-                            )
+                            log.error("cuesUrl returned non-JSON. contentType='{}', head='{}'", ct, txt.take(200).replace("\n", " "))
                             error("cuesUrl returned non-JSON (expected application/json)")
                         }
                         json.decodeFromString(EpisodeCuesPayload.serializer(), txt)
@@ -85,36 +81,19 @@ fun Application.configureVideoJobsRouting() {
                         "lines count (${req.render.lines.size}) must match cues (${cues.items.size})"
                     }
 
-                    // 3) FRAME SIZE: как и раньше — вертикаль управляется флагом, а не Resolution
                     val isVertical = req.render.vertical
                     val w = if (isVertical) 1080 else 1920
                     val h = if (isVertical) 1920 else 1080
                     val fps = req.render.fps
                     val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
 
-                    // 4) ASS: используем текущий AssBuilder и существующие стили
                     val ass = File(tmpDir, "overlay.ass")
                     if (isVertical) {
-                        AssBuilder.buildAssFileVerticalInstant(
-                            target = ass,
-                            cues = cues,
-                            lines = req.render.lines,
-                            style = req.render.overlayStyle,
-                            width = w,
-                            height = h
-                        )
+                        AssBuilder.buildAssFileVerticalInstant(ass, cues, req.render.lines, req.render.overlayStyle, w, h)
                     } else {
-                        AssBuilder.buildAssFile(
-                            target = ass,
-                            cues = cues,
-                            lines = req.render.lines,
-                            style = req.render.overlayStyle,
-                            width = w,
-                            height = h
-                        )
+                        AssBuilder.buildAssFile(ass, cues, req.render.lines, req.render.overlayStyle, w, h)
                     }
 
-                    // 5) BG COLOR FALLBACK (как было)
                     val requestedHex = req.render.background.colorHex
                     fun isVeryDark(hex: String?): Boolean {
                         if (hex == null) return true
@@ -125,24 +104,15 @@ fun Application.configureVideoJobsRouting() {
                         val b = hsh.substring(4, 6).toInt(16)
                         return (r + g + b) <= 0x60
                     }
-
                     val defaultBg = "#6A6A6A"
-                    val finalBgHex = if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) {
-                        defaultBg
-                    } else {
-                        requestedHex ?: defaultBg
-                    }
-                    val bgPadHex = finalBgHex.removePrefix("#")
-                    val bgPadFF = "0x$bgPadHex"
-                    log.info("VideoRender: output={}x{}, fps={}, bgColor=#{}", w, h, fps, bgPadHex)
+                    val finalBgHex = if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) defaultBg else (requestedHex ?: defaultBg)
+                    val bgPadFF = "0x${finalBgHex.removePrefix("#")}"
+                    log.info("VideoRender: output={}x{}, fps={}, bgColor=#{}", w, h, fps, finalBgHex.removePrefix("#"))
 
-                    // 6) ESCAPE .ass PATH ДЛЯ FILTERGRAPH
                     fun escForFilterPath(p: String): String =
                         p.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
-
                     val assPathEsc = escForFilterPath(ass.absolutePath)
 
-                    // 7) СБОРКА КОМАНДЫ FFMPEG
                     val outFile = File(tmpDir, "out.mp4")
                     val cmd = mutableListOf<String>().apply {
                         add("ffmpeg")
@@ -150,14 +120,14 @@ fun Application.configureVideoJobsRouting() {
                         add("-y")
                     }
 
-                    // Проверяем есть ли backgroundSpans
                     val spans = req.render.backgroundSpans
                         .distinctBy { it.anchorIdx }
                         .sortedBy { it.anchorIdx }
                         .filter { it.anchorIdx in 0..cues.items.lastIndex }
 
                     if (spans.isNotEmpty()) {
-                        // --- ВЕТКА СО СПАНАМИ ---
+                        val fx: RenderEffects = req.render.effects
+
                         val prep = BackgroundSpansFfmpeg.prepare(
                             spans = spans,
                             cues = cues.items,
@@ -165,27 +135,23 @@ fun Application.configureVideoJobsRouting() {
                             height = h,
                             fps = fps,
                             workDir = tmpDir.toPath(),
-                            http = jHttp
+                            http = jHttp,
+                            effects = fx
                         ) ?: error("Failed to prepare background spans")
 
-                        // добавляем видео-инпуты-картинки
                         cmd.addAll(prep.inputArgs)
-
-                        // добавляем аудио ПОСЛЕДНИМ входом
                         cmd.addAll(listOf("-i", audioFile.absolutePath))
 
-                        // строим полный filter_complex: concat фона → subtitles → [vout]
                         val filter = StringBuilder().apply {
                             append(prep.filterComplex)
                             append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
                         }.toString()
 
-                        val audioInputIndex = prep.inputsCount // аудио идёт после всех видео-источников
+                        val audioInputIndex = prep.inputsCount
                         cmd.addAll(
                             listOf(
                                 "-filter_complex", filter,
-                                "-map", "[vout]",
-                                "-map", "$audioInputIndex:a",
+                                "-map", "[vout]", "-map", "$audioInputIndex:a",
                                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
                                 "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
                                 "-movflags", "+faststart", "-shortest",
@@ -193,7 +159,6 @@ fun Application.configureVideoJobsRouting() {
                             )
                         )
                     } else {
-                        // --- СТАРЫЙ ПУТЬ: одна картинка или цвет + -vf ---
                         val inputs = mutableListOf<String>()
                         if (req.render.background.imageUrl != null) {
                             val bg = File(tmpDir, "bg.jpg")
@@ -203,15 +168,12 @@ fun Application.configureVideoJobsRouting() {
                             }
                             inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath) // #0
                         } else {
-                            inputs += listOf(
-                                "-f", "lavfi", "-t", "%.3f".format(totalSec),
-                                "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps" // #0
-                            )
+                            inputs += listOf("-f", "lavfi", "-t", "%.3f".format(totalSec), "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps") // #0
                         }
                         inputs += listOf("-i", audioFile.absolutePath) // #1
 
                         val vf = listOf(
-                            "scale=w=$w:h=-1:force_original_aspect_ratio=decrease",
+                            "scale=w=$w:h=$h:force_original_aspect_ratio=decrease",
                             "pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF",
                             "format=yuv420p",
                             "fps=$fps",
@@ -267,14 +229,7 @@ fun Application.configureVideoJobsRouting() {
         get("/video/jobs/{id}") {
             val id = call.parameters["id"]!!
             val job = VideoJobManager.get(id) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respond(
-                VideoJobResponse(
-                    jobId = job.id,
-                    status = job.status,
-                    message = job.message,
-                    durationMs = job.durationMs
-                )
-            )
+            call.respond(VideoJobResponse(job.id, job.status, job.message, job.durationMs))
         }
 
         get("/video/jobs/{id}/file") {
