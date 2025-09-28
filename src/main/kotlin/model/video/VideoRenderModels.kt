@@ -41,7 +41,7 @@ data class OverlayStyle(
     val shadow: Boolean = true,
     val boxColor: String = "#000000",
     val boxOpacity: Double = 0.35,
-    val align: String = "CENTER", // LEFT | CENTER
+    val align: String = "CENTER",
     val previous: OverlayLineStyle = OverlayLineStyle("#FFFFFF", 0.55, false),
     val current: OverlayLineStyle = OverlayLineStyle("#FFFFFF", 1.0, true),
     val next: OverlayLineStyle = OverlayLineStyle("#FFFFFF", 0.7, false)
@@ -69,10 +69,10 @@ data class TransitionSpec(
 @Serializable
 data class MotionSpec(
     val enabled: Boolean = true,
-    val maxZoom: Double = 1.03,
-    val panFraction: Double = 0.02,
-    val minSpanSec: Double = 2.0,
-    val alternateAxis: Boolean = true,
+    val maxZoom: Double = 1.15,
+    val panFraction: Double = 0.0,
+    val minSpanSec: Double = 3.5,
+    val alternateAxis: Boolean = false,
     val easing: String = "cosine"
 )
 
