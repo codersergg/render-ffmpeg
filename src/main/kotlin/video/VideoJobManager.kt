@@ -1,6 +1,6 @@
 package com.codersergg.video
 
-import com.codersergg.model.JobStatus
+import com.codersergg.model.video.JobStatus
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 

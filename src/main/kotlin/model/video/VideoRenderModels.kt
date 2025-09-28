@@ -1,4 +1,4 @@
-package com.codersergg.model
+package com.codersergg.model.video
 
 import kotlinx.serialization.Serializable
 
@@ -54,6 +54,12 @@ data class BackgroundSpec(
 )
 
 @Serializable
+data class BackgroundSpan(
+    val anchorIdx: Int,
+    val imageUrl: String
+)
+
+@Serializable
 data class VideoRenderRequest(
     val audioUrl: String,
     val cuesUrl: String? = null,
@@ -66,5 +72,6 @@ data class VideoRenderRequest(
     val overlayStyle: OverlayStyle = OverlayStyle(),
     val background: BackgroundSpec = BackgroundSpec(),
     val returnAsFile: Boolean = true,
-    val vertical: Boolean = false
+    val vertical: Boolean = false,
+    val backgroundSpans: List<BackgroundSpan> = emptyList()
 )

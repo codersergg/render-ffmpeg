@@ -1,10 +1,11 @@
 package com.codersergg
 
-import com.codersergg.model.CreateVideoJobRequest
-import com.codersergg.model.EpisodeCuesPayload
-import com.codersergg.model.JobStatus
-import com.codersergg.model.VideoJobResponse
+import com.codersergg.model.video.CreateVideoJobRequest
+import com.codersergg.model.video.EpisodeCuesPayload
+import com.codersergg.model.video.JobStatus
+import com.codersergg.model.video.VideoJobResponse
 import com.codersergg.video.AssBuilder
+import com.codersergg.video.BackgroundSpansFfmpeg
 import com.codersergg.video.VideoJob
 import com.codersergg.video.VideoJobManager
 import io.ktor.client.*
@@ -24,7 +25,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.io.File
-import java.util.UUID
+import java.net.http.HttpClient
+import java.util.*
 
 fun Application.configureVideoJobsRouting() {
     val log = LoggerFactory.getLogger("VideoJobs")
@@ -48,15 +50,17 @@ fun Application.configureVideoJobsRouting() {
             appScope.launch {
                 job.status = JobStatus.RUNNING
                 val client = HttpClient(CIO)
+                val jHttp = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()
+
                 try {
-                    // 1) audio
+                    // 1) AUDIO
                     val audioFile = File(tmpDir, "audio.mp3")
                     client.get(req.render.audioUrl).apply {
                         if (!status.isSuccess()) error("Audio download failed: $status")
                         bodyAsChannel().copyTo(audioFile.outputStream())
                     }
 
-                    // 2) cues
+                    // 2) CUES
                     val cues: EpisodeCuesPayload = req.render.cues ?: run {
                         val cuesUrl = requireNotNull(req.render.cuesUrl) { "cuesUrl is required when cues is null" }
                         val resp = client.get(cuesUrl) { accept(ContentType.Application.Json) }
@@ -81,14 +85,14 @@ fun Application.configureVideoJobsRouting() {
                         "lines count (${req.render.lines.size}) must match cues (${cues.items.size})"
                     }
 
-                    // 3) Размер кадра: по умолчанию горизонталь; вертикаль только по флагу
+                    // 3) FRAME SIZE: как и раньше — вертикаль управляется флагом, а не Resolution
                     val isVertical = req.render.vertical
                     val w = if (isVertical) 1080 else 1920
                     val h = if (isVertical) 1920 else 1080
                     val fps = req.render.fps
                     val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
 
-                    // 4) .ass под финальный размер + разная логика горизонт/вертикаль
+                    // 4) ASS: используем текущий AssBuilder и существующие стили
                     val ass = File(tmpDir, "overlay.ass")
                     if (isVertical) {
                         AssBuilder.buildAssFileVerticalInstant(
@@ -110,7 +114,7 @@ fun Application.configureVideoJobsRouting() {
                         )
                     }
 
-                    // 5) Фон (безопасный дефолт, если слишком тёмный и нет картинки)
+                    // 5) BG COLOR FALLBACK (как было)
                     val requestedHex = req.render.background.colorHex
                     fun isVeryDark(hex: String?): Boolean {
                         if (hex == null) return true
@@ -121,6 +125,7 @@ fun Application.configureVideoJobsRouting() {
                         val b = hsh.substring(4, 6).toInt(16)
                         return (r + g + b) <= 0x60
                     }
+
                     val defaultBg = "#6A6A6A"
                     val finalBgHex = if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) {
                         defaultBg
@@ -131,51 +136,102 @@ fun Application.configureVideoJobsRouting() {
                     val bgPadFF = "0x$bgPadHex"
                     log.info("VideoRender: output={}x{}, fps={}, bgColor=#{}", w, h, fps, bgPadHex)
 
-                    // 6) inputs
-                    val inputs = mutableListOf<String>()
-                    if (req.render.background.imageUrl != null) {
-                        val bg = File(tmpDir, "bg.jpg")
-                        client.get(requireNotNull(req.render.background.imageUrl)).apply {
-                            if (!status.isSuccess()) error("Background download failed: $status")
-                            bodyAsChannel().copyTo(bg.outputStream())
-                        }
-                        inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath) // #0
-                    } else {
-                        inputs += listOf(
-                            "-f", "lavfi", "-t", "%.3f".format(totalSec),
-                            "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps" // #0
-                        )
-                    }
-                    inputs += listOf("-i", audioFile.absolutePath) // #1
-
+                    // 6) ESCAPE .ass PATH ДЛЯ FILTERGRAPH
                     fun escForFilterPath(p: String): String =
                         p.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
 
-                    val assPath = escForFilterPath(ass.absolutePath)
+                    val assPathEsc = escForFilterPath(ass.absolutePath)
 
-                    // 7) фильтр: субтитры последними
-                    val vf = listOf(
-                        "scale=w=$w:h=-1:force_original_aspect_ratio=decrease",
-                        "pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF",
-                        "format=yuv420p",
-                        "fps=$fps",
-                        "subtitles='${assPath}'"
-                    ).joinToString(",")
-
-                    // 8) рендер
+                    // 7) СБОРКА КОМАНДЫ FFMPEG
                     val outFile = File(tmpDir, "out.mp4")
                     val cmd = mutableListOf<String>().apply {
                         add("ffmpeg")
                         addAll(listOf("-hide_banner", "-loglevel", "info", "-stats"))
                         add("-y")
-                        addAll(inputs)
-                        addAll(listOf("-vf", vf))
-                        addAll(listOf("-map", "0:v", "-map", "1:a"))
-                        addAll(listOf("-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"))
-                        addAll(listOf("-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k"))
-                        addAll(listOf("-movflags", "+faststart", "-shortest"))
-                        add(outFile.absolutePath)
                     }
+
+                    // Проверяем есть ли backgroundSpans
+                    val spans = req.render.backgroundSpans
+                        .distinctBy { it.anchorIdx }
+                        .sortedBy { it.anchorIdx }
+                        .filter { it.anchorIdx in 0..cues.items.lastIndex }
+
+                    if (spans.isNotEmpty()) {
+                        // --- ВЕТКА СО СПАНАМИ ---
+                        val prep = BackgroundSpansFfmpeg.prepare(
+                            spans = spans,
+                            cues = cues.items,
+                            width = w,
+                            height = h,
+                            fps = fps,
+                            workDir = tmpDir.toPath(),
+                            http = jHttp
+                        ) ?: error("Failed to prepare background spans")
+
+                        // добавляем видео-инпуты-картинки
+                        cmd.addAll(prep.inputArgs)
+
+                        // добавляем аудио ПОСЛЕДНИМ входом
+                        cmd.addAll(listOf("-i", audioFile.absolutePath))
+
+                        // строим полный filter_complex: concat фона → subtitles → [vout]
+                        val filter = StringBuilder().apply {
+                            append(prep.filterComplex)
+                            append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                        }.toString()
+
+                        val audioInputIndex = prep.inputsCount // аудио идёт после всех видео-источников
+                        cmd.addAll(
+                            listOf(
+                                "-filter_complex", filter,
+                                "-map", "[vout]",
+                                "-map", "$audioInputIndex:a",
+                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                "-movflags", "+faststart", "-shortest",
+                                outFile.absolutePath
+                            )
+                        )
+                    } else {
+                        // --- СТАРЫЙ ПУТЬ: одна картинка или цвет + -vf ---
+                        val inputs = mutableListOf<String>()
+                        if (req.render.background.imageUrl != null) {
+                            val bg = File(tmpDir, "bg.jpg")
+                            client.get(requireNotNull(req.render.background.imageUrl)).apply {
+                                if (!status.isSuccess()) error("Background download failed: $status")
+                                bodyAsChannel().copyTo(bg.outputStream())
+                            }
+                            inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath) // #0
+                        } else {
+                            inputs += listOf(
+                                "-f", "lavfi", "-t", "%.3f".format(totalSec),
+                                "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps" // #0
+                            )
+                        }
+                        inputs += listOf("-i", audioFile.absolutePath) // #1
+
+                        val vf = listOf(
+                            "scale=w=$w:h=-1:force_original_aspect_ratio=decrease",
+                            "pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF",
+                            "format=yuv420p",
+                            "fps=$fps",
+                            "subtitles='${assPathEsc}'"
+                        ).joinToString(",")
+
+                        cmd.addAll(inputs)
+                        cmd.addAll(
+                            listOf(
+                                "-vf", vf,
+                                "-map", "0:v", "-map", "1:a",
+                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                "-movflags", "+faststart", "-shortest",
+                                outFile.absolutePath
+                            )
+                        )
+                    }
+
+                    log.info("VideoRender: ffmpeg command: {}", cmd.joinToString(" "))
 
                     val start = System.currentTimeMillis()
                     val p = ProcessBuilder(cmd).directory(tmpDir).redirectErrorStream(true).start()

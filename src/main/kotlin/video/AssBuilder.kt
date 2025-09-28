@@ -1,8 +1,8 @@
 package com.codersergg.video
 
-import com.codersergg.model.EpisodeCuesPayload
-import com.codersergg.model.OverlayLineStyle
-import com.codersergg.model.OverlayStyle
+import com.codersergg.model.video.EpisodeCuesPayload
+import com.codersergg.model.video.OverlayLineStyle
+import com.codersergg.model.video.OverlayStyle
 import java.io.File
 import kotlin.math.max
 import kotlin.math.min

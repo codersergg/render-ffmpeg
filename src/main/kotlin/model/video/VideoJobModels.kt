@@ -1,4 +1,4 @@
-package com.codersergg.model
+package com.codersergg.model.video
 
 import kotlinx.serialization.Serializable
 
