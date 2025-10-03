@@ -22,20 +22,14 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.io.File
-import java.net.http.HttpClient
 import java.util.*
 import kotlin.math.roundToInt
+
+private val json = Json { ignoreUnknownKeys = true }
 
 fun Application.configureVideoJobsRouting() {
     val log = LoggerFactory.getLogger("VideoJobs")
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-        explicitNulls = false
-        encodeDefaults = true
-    }
 
     routing {
         post("/video/jobs") {
@@ -48,7 +42,6 @@ fun Application.configureVideoJobsRouting() {
             appScope.launch {
                 job.status = JobStatus.RUNNING
                 val client = HttpClient(CIO)
-                val jHttp = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()
 
                 try {
                     val audioFile = File(tmpDir, "audio.mp3")
@@ -70,21 +63,22 @@ fun Application.configureVideoJobsRouting() {
                         if (!ct.contains("application/json") || !looksLikeJson) {
                             log.error(
                                 "cuesUrl returned non-JSON. contentType='{}', head='{}'",
-                                ct,
-                                txt.take(200).replace("\n", " ")
+                                ct, txt.take(200).replace("\n", " ")
                             )
                             error("cuesUrl returned non-JSON (expected application/json)")
                         }
                         json.decodeFromString(EpisodeCuesPayload.serializer(), txt)
                     }
 
-                    require(cues.items.size == req.render.lines.size) {
-                        "lines count (${req.render.lines.size}) must match cues (${cues.items.size})"
+                    val lines = requireNotNull(req.render.lines) { "render.lines is required" }
+                    require(cues.items.size == lines.size) {
+                        "lines count (${lines.size}) must match cues (${cues.items.size})"
                     }
 
-                    val isVertical = req.render.vertical
-                    val w = if (isVertical) 1080 else 1920
-                    val h = if (isVertical) 1920 else 1080
+                    // уважаем присланное разрешение
+                    val w = req.render.resolution.width
+                    val h = req.render.resolution.height
+                    val isVertical = h > w
                     val fps = req.render.fps
 
                     val resolvedLayout: TextLayout =
@@ -101,7 +95,7 @@ fun Application.configureVideoJobsRouting() {
                             AssBuilder.buildAssFileVerticalInstant(
                                 target = ass,
                                 cues = cues,
-                                lines = req.render.lines,
+                                lines = lines,
                                 style = req.render.overlayStyle,
                                 width = w,
                                 height = h,
@@ -113,7 +107,7 @@ fun Application.configureVideoJobsRouting() {
                             AssBuilder.buildAssFilePanelLeftReplace(
                                 target = ass,
                                 cues = cues,
-                                lines = req.render.lines,
+                                lines = lines,
                                 style = req.render.overlayStyle,
                                 width = w,
                                 height = h,
@@ -129,7 +123,7 @@ fun Application.configureVideoJobsRouting() {
                                 AssBuilder.buildAssFileVerticalInstant(
                                     target = ass,
                                     cues = cues,
-                                    lines = req.render.lines,
+                                    lines = lines,
                                     style = req.render.overlayStyle,
                                     width = w,
                                     height = h,
@@ -139,7 +133,7 @@ fun Application.configureVideoJobsRouting() {
                                 AssBuilder.buildAssFile(
                                     target = ass,
                                     cues = cues,
-                                    lines = req.render.lines,
+                                    lines = lines,
                                     style = req.render.overlayStyle,
                                     width = w,
                                     height = h,
@@ -188,11 +182,8 @@ fun Application.configureVideoJobsRouting() {
 
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
-
-                    fun colorForDrawbox(hexNoHash: String, alpha: Double): String {
-                        val a = alpha.coerceIn(0.0, 1.0)
-                        return "0x$hexNoHash@$a"
-                    }
+                    fun colorForDrawbox(hexNoHash: String, alpha: Double): String =
+                        "0x$hexNoHash@${alpha.coerceIn(0.0, 1.0)}"
 
                     if (spans.isNotEmpty()) {
                         val prep = BackgroundSpansFfmpeg.prepare(
@@ -202,35 +193,87 @@ fun Application.configureVideoJobsRouting() {
                             height = h,
                             fps = fps,
                             workDir = tmpDir.toPath(),
-                            http = jHttp,
                             effects = req.render.effects
-                        ) ?: error("Failed to prepare background spans")
-
-                        cmd.addAll(prep.inputArgs)
-                        cmd.addAll(listOf("-i", audioFile.absolutePath))
-
-                        val filter = StringBuilder().apply {
-                            append(prep.filterComplex)
-                            if (needPanel) {
-                                val color = colorForDrawbox(panelColorHex, panelOpacity)
-                                append("${prep.videoOutLabel}drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill[pnl];")
-                                append("[pnl]subtitles='${assPathEsc}':[vout];")
-                            } else {
-                                append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                        ) { url, dest ->
+                            client.get(url).apply {
+                                if (!status.isSuccess()) error("download failed: $status")
+                                bodyAsChannel().copyTo(dest.toFile().outputStream())
                             }
-                        }.toString()
+                        }
 
-                        val audioInputIndex = prep.inputsCount
-                        cmd.addAll(
-                            listOf(
-                                "-filter_complex", filter,
-                                "-map", "[vout]", "-map", "$audioInputIndex:a",
-                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                                "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
-                                "-movflags", "+faststart", "-shortest",
-                                outFile.absolutePath
+                        if (prep != null) {
+                            cmd.addAll(prep.inputArgs)
+                            cmd.addAll(listOf("-i", audioFile.absolutePath))
+
+                            val filter = buildString {
+                                append(prep.filterComplex)
+                                if (needPanel) {
+                                    val color = colorForDrawbox(panelColorHex, panelOpacity)
+                                    append("${prep.videoOutLabel}drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill[pnl];")
+                                    append("[pnl]subtitles='${assPathEsc}':[vout];")
+                                } else {
+                                    append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                                }
+                            }
+
+                            val audioInputIndex = prep.inputsCount
+                            cmd.addAll(
+                                listOf(
+                                    "-filter_complex", filter,
+                                    "-map", "[vout]", "-map", "$audioInputIndex:a",
+                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                    "-movflags", "+faststart", "-shortest",
+                                    outFile.absolutePath
+                                )
                             )
-                        )
+                        } else {
+                            val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
+                            val inputs = mutableListOf<String>()
+                            if (req.render.background.imageUrl != null) {
+                                val bg = File(tmpDir, "bg.jpg")
+                                client.get(requireNotNull(req.render.background.imageUrl)).apply {
+                                    if (!status.isSuccess()) error("Background download failed: $status")
+                                    bodyAsChannel().copyTo(bg.outputStream())
+                                }
+                                inputs += listOf(
+                                    "-loop",
+                                    "1",
+                                    "-t",
+                                    "%.3f".format(totalSec),
+                                    "-i",
+                                    bg.absolutePath
+                                ) // #0
+                            } else {
+                                inputs += listOf(
+                                    "-f", "lavfi", "-t", "%.3f".format(totalSec),
+                                    "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps"
+                                )
+                            }
+                            inputs += listOf("-i", audioFile.absolutePath) // #1
+                            cmd.addAll(inputs)
+
+                            val vf = buildString {
+                                append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                                append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                                if (needPanel) {
+                                    val color = colorForDrawbox(panelColorHex, panelOpacity)
+                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill,")
+                                }
+                                append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
+                            }
+
+                            cmd.addAll(
+                                listOf(
+                                    "-vf", vf,
+                                    "-map", "0:v", "-map", "1:a",
+                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                    "-movflags", "+faststart", "-shortest",
+                                    outFile.absolutePath
+                                )
+                            )
+                        }
                     } else {
                         val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
                         val inputs = mutableListOf<String>()

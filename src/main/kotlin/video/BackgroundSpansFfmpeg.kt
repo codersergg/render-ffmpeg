@@ -3,10 +3,6 @@ package com.codersergg.video
 import com.codersergg.model.video.BackgroundSpan
 import com.codersergg.model.video.CueItem
 import com.codersergg.model.video.RenderEffects
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.math.max
@@ -21,15 +17,27 @@ object BackgroundSpansFfmpeg {
         val inputsCount: Int
     )
 
-    fun prepare(
+    /**
+     * Готовит входы и filter_complex для ffmpeg, используя список фоновых спанов.
+     *
+     * @param spans         список фоновых изображений, привязанных к индексам реплик (anchorIdx)
+     * @param cues          список таймингов (старт/конец) для каждой реплики
+     * @param width         ширина итогового видео
+     * @param height        высота итогового видео
+     * @param fps           частота кадров
+     * @param workDir       рабочая директория для временных файлов
+     * @param effects       эффекты рендера (переходы и т.п.)
+     * @param downloader    suspend-функция скачивания файла: (url, dest) -> Unit
+     */
+    suspend fun prepare(
         spans: List<BackgroundSpan>,
         cues: List<CueItem>,
         width: Int,
         height: Int,
         fps: Int,
         workDir: Path,
-        http: HttpClient,
-        effects: RenderEffects
+        effects: RenderEffects? = null,
+        downloader: suspend (url: String, dest: Path) -> Unit
     ): Prepared? {
         if (spans.isEmpty() || cues.isEmpty()) return null
 
@@ -58,7 +66,7 @@ object BackgroundSpansFfmpeg {
             val durMs = durationsMs[i]
             if (durMs <= 0L) continue
 
-            val imagePath = downloadImage(span.imageUrl, workDir, http)
+            val imagePath = downloadImage(span.imageUrl, workDir, downloader)
 
             inputArgs += listOf(
                 "-loop", "1",
@@ -75,7 +83,7 @@ object BackgroundSpansFfmpeg {
                         "scale=w=$width:h=$height:force_original_aspect_ratio=decrease," +
                         "pad=$width:$height:(ow-iw)/2:(oh-ih)/2:color=black," +
                         "fps=$fps,format=yuv420p,setsar=1" +
-                        "$outLabel;"
+                        outLabel + ";"
             )
 
             labels += outLabel
@@ -83,12 +91,16 @@ object BackgroundSpansFfmpeg {
         }
 
         if (videoInputs == 0) return null
+
         if (videoInputs == 1) {
             filters.append("${labels.first()}copy[bg];")
             return Prepared(inputArgs, filters.toString(), "[bg]", videoInputs)
         }
 
-        val tr = effects.transition
+        val trType = effects?.transition?.type ?: "fade"
+        val trDurSec = (effects?.transition?.durationSec ?: 0.40).coerceAtLeast(0.05)
+        val trCenter = effects?.transition?.centerOnBoundary ?: true
+
         var prevOutLabel = labels[0]
         var prevOutDur = durationsMs[0] / 1000.0
 
@@ -96,14 +108,14 @@ object BackgroundSpansFfmpeg {
             val curLabel = labels[i]
             val curDur = durationsMs[i] / 1000.0
 
-            val d = min(tr.durationSec, min(prevOutDur, curDur).coerceAtLeast(0.05))
-            val rawOffset = if (tr.centerOnBoundary) prevOutDur - d / 2.0 else prevOutDur - d
+            val d = min(trDurSec, min(prevOutDur, curDur).coerceAtLeast(0.05))
+            val rawOffset = if (trCenter) prevOutDur - d / 2.0 else prevOutDur - d
             val offset = max(0.0, rawOffset)
 
             val outLabel = if (i == videoInputs - 1) "[bg]" else "[x$i]"
             filters.append(
                 "$prevOutLabel$curLabel" +
-                        "xfade=transition=${tr.type}:duration=${fmt(d)}:offset=${fmt(offset)}" +
+                        "xfade=transition=${trType}:duration=${fmt(d)}:offset=${fmt(offset)}" +
                         outLabel + ";"
             )
 
@@ -114,12 +126,13 @@ object BackgroundSpansFfmpeg {
         return Prepared(inputArgs, filters.toString(), "[bg]", videoInputs)
     }
 
-    private fun downloadImage(url: String, workDir: Path, http: HttpClient): Path {
-        val req = HttpRequest.newBuilder(URI.create(url)).GET().build()
-        val resp = http.send(req, HttpResponse.BodyHandlers.ofByteArray())
-        require(resp.statusCode() in 200..299) { "Failed to download image: $url, status=${resp.statusCode()}" }
+    private suspend fun downloadImage(
+        url: String,
+        workDir: Path,
+        downloader: suspend (url: String, dest: Path) -> Unit
+    ): Path {
         val file = Files.createTempFile(workDir, "bg_", ".img")
-        Files.write(file, resp.body())
+        downloader(url, file)
         return file
     }
 
