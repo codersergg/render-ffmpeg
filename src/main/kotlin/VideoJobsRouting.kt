@@ -1,10 +1,6 @@
 package com.codersergg
 
-import com.codersergg.model.video.CreateVideoJobRequest
-import com.codersergg.model.video.EpisodeCuesPayload
-import com.codersergg.model.video.JobStatus
-import com.codersergg.model.video.RenderEffects
-import com.codersergg.model.video.VideoJobResponse
+import com.codersergg.model.video.*
 import com.codersergg.video.AssBuilder
 import com.codersergg.video.BackgroundSpansFfmpeg
 import com.codersergg.video.VideoJob
@@ -28,6 +24,7 @@ import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.http.HttpClient
 import java.util.*
+import kotlin.math.roundToInt
 
 fun Application.configureVideoJobsRouting() {
     val log = LoggerFactory.getLogger("VideoJobs")
@@ -71,7 +68,11 @@ fun Application.configureVideoJobsRouting() {
                         val txt = resp.bodyAsText()
                         val looksLikeJson = txt.firstOrNull() == '{'
                         if (!ct.contains("application/json") || !looksLikeJson) {
-                            log.error("cuesUrl returned non-JSON. contentType='{}', head='{}'", ct, txt.take(200).replace("\n", " "))
+                            log.error(
+                                "cuesUrl returned non-JSON. contentType='{}', head='{}'",
+                                ct,
+                                txt.take(200).replace("\n", " ")
+                            )
                             error("cuesUrl returned non-JSON (expected application/json)")
                         }
                         json.decodeFromString(EpisodeCuesPayload.serializer(), txt)
@@ -85,13 +86,67 @@ fun Application.configureVideoJobsRouting() {
                     val w = if (isVertical) 1080 else 1920
                     val h = if (isVertical) 1920 else 1080
                     val fps = req.render.fps
-                    val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
+
+                    val resolvedLayout: TextLayout =
+                        req.render.layout ?: if (isVertical) TextLayout.VERTICAL_ONE else TextLayout.BLUR_UNDERLAY
 
                     val ass = File(tmpDir, "overlay.ass")
-                    if (isVertical) {
-                        AssBuilder.buildAssFileVerticalInstant(ass, cues, req.render.lines, req.render.overlayStyle, w, h)
-                    } else {
-                        AssBuilder.buildAssFile(ass, cues, req.render.lines, req.render.overlayStyle, w, h)
+
+                    val panelSpec = req.render.panel ?: PanelSpec()
+                    val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceAtLeast(200)
+                    val visibleLinesPanel = req.render.visibleLines ?: 9
+
+                    when (resolvedLayout) {
+                        TextLayout.VERTICAL_ONE -> {
+                            AssBuilder.buildAssFileVerticalInstant(
+                                target = ass,
+                                cues = cues,
+                                lines = req.render.lines,
+                                style = req.render.overlayStyle,
+                                width = w,
+                                height = h,
+                                metaHeader = req.render.metaHeader
+                            )
+                        }
+
+                        TextLayout.PANEL_LEFT -> {
+                            AssBuilder.buildAssFilePanelLeftReplace(
+                                target = ass,
+                                cues = cues,
+                                lines = req.render.lines,
+                                style = req.render.overlayStyle,
+                                width = w,
+                                height = h,
+                                panelWidthPx = panelWidthPx,
+                                panelInnerPaddingPx = panelSpec.innerPaddingPx,
+                                visibleLines = visibleLinesPanel,
+                                metaHeader = req.render.metaHeader
+                            )
+                        }
+
+                        else -> {
+                            if (isVertical) {
+                                AssBuilder.buildAssFileVerticalInstant(
+                                    target = ass,
+                                    cues = cues,
+                                    lines = req.render.lines,
+                                    style = req.render.overlayStyle,
+                                    width = w,
+                                    height = h,
+                                    metaHeader = req.render.metaHeader
+                                )
+                            } else {
+                                AssBuilder.buildAssFile(
+                                    target = ass,
+                                    cues = cues,
+                                    lines = req.render.lines,
+                                    style = req.render.overlayStyle,
+                                    width = w,
+                                    height = h,
+                                    metaHeader = req.render.metaHeader
+                                )
+                            }
+                        }
                     }
 
                     val requestedHex = req.render.background.colorHex
@@ -104,13 +159,17 @@ fun Application.configureVideoJobsRouting() {
                         val b = hsh.substring(4, 6).toInt(16)
                         return (r + g + b) <= 0x60
                     }
+
                     val defaultBg = "#6A6A6A"
-                    val finalBgHex = if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) defaultBg else (requestedHex ?: defaultBg)
+                    val finalBgHex =
+                        if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) defaultBg else (requestedHex
+                            ?: defaultBg)
                     val bgPadFF = "0x${finalBgHex.removePrefix("#")}"
                     log.info("VideoRender: output={}x{}, fps={}, bgColor=#{}", w, h, fps, finalBgHex.removePrefix("#"))
 
                     fun escForFilterPath(p: String): String =
                         p.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
+
                     val assPathEsc = escForFilterPath(ass.absolutePath)
 
                     val outFile = File(tmpDir, "out.mp4")
@@ -120,14 +179,22 @@ fun Application.configureVideoJobsRouting() {
                         add("-y")
                     }
 
+                    val needPanel = (resolvedLayout == TextLayout.PANEL_LEFT)
+
                     val spans = req.render.backgroundSpans
                         .distinctBy { it.anchorIdx }
                         .sortedBy { it.anchorIdx }
                         .filter { it.anchorIdx in 0..cues.items.lastIndex }
 
-                    if (spans.isNotEmpty()) {
-                        val fx: RenderEffects = req.render.effects
+                    val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
+                    val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
 
+                    fun colorForDrawbox(hexNoHash: String, alpha: Double): String {
+                        val a = alpha.coerceIn(0.0, 1.0)
+                        return "0x$hexNoHash@$a"
+                    }
+
+                    if (spans.isNotEmpty()) {
                         val prep = BackgroundSpansFfmpeg.prepare(
                             spans = spans,
                             cues = cues.items,
@@ -136,7 +203,7 @@ fun Application.configureVideoJobsRouting() {
                             fps = fps,
                             workDir = tmpDir.toPath(),
                             http = jHttp,
-                            effects = fx
+                            effects = req.render.effects
                         ) ?: error("Failed to prepare background spans")
 
                         cmd.addAll(prep.inputArgs)
@@ -144,7 +211,13 @@ fun Application.configureVideoJobsRouting() {
 
                         val filter = StringBuilder().apply {
                             append(prep.filterComplex)
-                            append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                            if (needPanel) {
+                                val color = colorForDrawbox(panelColorHex, panelOpacity)
+                                append("${prep.videoOutLabel}drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill[pnl];")
+                                append("[pnl]subtitles='${assPathEsc}':[vout];")
+                            } else {
+                                append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                            }
                         }.toString()
 
                         val audioInputIndex = prep.inputsCount
@@ -159,6 +232,7 @@ fun Application.configureVideoJobsRouting() {
                             )
                         )
                     } else {
+                        val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
                         val inputs = mutableListOf<String>()
                         if (req.render.background.imageUrl != null) {
                             val bg = File(tmpDir, "bg.jpg")
@@ -168,19 +242,24 @@ fun Application.configureVideoJobsRouting() {
                             }
                             inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath) // #0
                         } else {
-                            inputs += listOf("-f", "lavfi", "-t", "%.3f".format(totalSec), "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps") // #0
+                            inputs += listOf(
+                                "-f", "lavfi", "-t", "%.3f".format(totalSec),
+                                "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps"
+                            )
                         }
                         inputs += listOf("-i", audioFile.absolutePath) // #1
-
-                        val vf = listOf(
-                            "scale=w=$w:h=$h:force_original_aspect_ratio=decrease",
-                            "pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF",
-                            "format=yuv420p",
-                            "fps=$fps",
-                            "subtitles='${assPathEsc}'"
-                        ).joinToString(",")
-
                         cmd.addAll(inputs)
+
+                        val vf = buildString {
+                            append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                            append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                            if (needPanel) {
+                                val color = colorForDrawbox(panelColorHex, panelOpacity)
+                                append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill,")
+                            }
+                            append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
+                        }
+
                         cmd.addAll(
                             listOf(
                                 "-vf", vf,
