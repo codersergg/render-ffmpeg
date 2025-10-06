@@ -192,12 +192,20 @@ object AssBuilder {
             appendLine(styleLine("cur",    style.current,  forceBold = true,  minOpacity = 1.00))
             appendLine(styleLine("next",   style.next,     forceBold = false, minOpacity = 0.70))
             if (shouldRenderHeader(metaHeader)) {
-                // стили шапки
                 val primaryHdr = styleHeaderTitle()
                 val primaryMeta = styleHeaderMeta()
+                fun styleHeaderSeparator() = buildString {
+                    val sep = rgbaToAss(0.50, "#FFFFFF")
+                    append("Style: hdrSep,${style.fontFamily},1,")
+                    append("$sep,&H000000FF,&H00000000,&H00000000,")
+                    append("0,0,0,0,0,0,0,0,1,2,0,$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
+                }
+
                 appendLine(primaryHdr)
                 appendLine(primaryMeta)
+                appendLine(styleHeaderSeparator())
             }
+
             appendLine()
 
             appendLine("[Events]")
@@ -220,10 +228,14 @@ object AssBuilder {
             }
 
             if (shouldRenderHeader(metaHeader)) {
-                val title = metaHeader?.storyTitle?.trim().orEmpty()
+                val title = splitTwo(metaHeader!!.storyTitle ?: "").a
                 val chips = buildChips(metaHeader)
                 add(3, 0, totalMs, "hdr", "{\\q2\\an7}", title)
                 if (chips.isNotEmpty()) add(3, 0, totalMs, "hdrMeta", "{\\q2\\an7}", chips)
+
+                val sepWidth = safeAvailPx
+                val path = "m 0 0 l $sepWidth 0 l $sepWidth 2 l 0 2"
+                add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1}", path)
             }
 
             val x = if (isLeft) marginL else width / 2

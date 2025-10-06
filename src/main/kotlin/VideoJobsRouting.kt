@@ -75,7 +75,6 @@ fun Application.configureVideoJobsRouting() {
                         "lines count (${lines.size}) must match cues (${cues.items.size})"
                     }
 
-                    // уважаем присланное разрешение
                     val w = req.render.resolution.width
                     val h = req.render.resolution.height
                     val isVertical = h > w
@@ -182,6 +181,23 @@ fun Application.configureVideoJobsRouting() {
 
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
+                    val dividerRight: Boolean = req.render.panel?.background?.dividerRight ?: true
+
+                    val branding = req.render.branding
+                    val wantBugLogo = branding.show
+                            && branding.logoUrl?.isNotBlank() == true
+                            && branding.placement.equals("TOP_RIGHT_BUG", ignoreCase = true)
+
+                    var logoPathEsc: String? = null
+                    if (wantBugLogo) {
+                        val logoFile = File(tmpDir, "branding-logo.png")
+                        client.get(branding.logoUrl!!).apply {
+                            if (!status.isSuccess()) error("logo download failed: $status")
+                            bodyAsChannel().copyTo(logoFile.outputStream())
+                        }
+                        logoPathEsc = escForFilterPath(logoFile.absolutePath)
+                    }
+
                     fun colorForDrawbox(hexNoHash: String, alpha: Double): String =
                         "0x$hexNoHash@${alpha.coerceIn(0.0, 1.0)}"
 
@@ -205,14 +221,47 @@ fun Application.configureVideoJobsRouting() {
                             cmd.addAll(prep.inputArgs)
                             cmd.addAll(listOf("-i", audioFile.absolutePath))
 
+                            val sceneW = (w - panelWidthPx).coerceAtLeast(1)
+                            val colorPanel = colorForDrawbox(panelColorHex, panelOpacity)
+
                             val filter = buildString {
                                 append(prep.filterComplex)
+
                                 if (needPanel) {
-                                    val color = colorForDrawbox(panelColorHex, panelOpacity)
-                                    append("${prep.videoOutLabel}drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill[pnl];")
-                                    append("[pnl]subtitles='${assPathEsc}':[vout];")
+                                    append("${prep.videoOutLabel}crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                    if (dividerRight) {
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                    }
+                                    append("format=yuv420p[fbase];")
+                                    // накладываем субтитры (шапка+контент в одном .ass)
+                                    append("[fbase]subtitles='${assPathEsc}'[withsubs];")
                                 } else {
-                                    append("${prep.videoOutLabel}subtitles='${assPathEsc}':[vout];")
+                                    append("${prep.videoOutLabel}subtitles='${assPathEsc}'[withsubs];")
+                                }
+
+                                if (wantBugLogo && logoPathEsc != null) {
+                                    val base = minOf(w, h)
+                                    val sizePx = if (branding.sizeMode.equals("FIXED", true))
+                                        branding.sizeValue.toInt().coerceAtLeast(16)
+                                    else
+                                        (base * branding.sizeValue).toInt().coerceAtLeast(24)
+
+                                    if (branding.plate.enabled) {
+                                        val plateColor = colorForDrawbox(
+                                            branding.plate.colorHex.removePrefix("#"),
+                                            branding.plate.opacity
+                                        )
+                                        val padP = branding.plate.paddingPx.coerceAtLeast(0)
+                                        append("movie='${logoPathEsc}',scale=-1:$sizePx,")
+                                        append("pad=iw+${padP * 2}:ih+${padP * 2}:$padP:$padP:color=$plateColor[logo];")
+                                    } else {
+                                        append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
+                                    }
+                                    append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout];")
+                                } else {
+                                    append("[withsubs]format=yuv420p[vout];")
                                 }
                             }
 
@@ -253,26 +302,76 @@ fun Application.configureVideoJobsRouting() {
                             inputs += listOf("-i", audioFile.absolutePath) // #1
                             cmd.addAll(inputs)
 
-                            val vf = buildString {
-                                append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
-                                append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
-                                if (needPanel) {
-                                    val color = colorForDrawbox(panelColorHex, panelOpacity)
-                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill,")
-                                }
-                                append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
-                            }
+                            val sceneW = (w - panelWidthPx).coerceAtLeast(1)
+                            val colorPanel = colorForDrawbox(panelColorHex, panelOpacity)
 
-                            cmd.addAll(
-                                listOf(
-                                    "-vf", vf,
-                                    "-map", "0:v", "-map", "1:a",
-                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
-                                    "-movflags", "+faststart", "-shortest",
-                                    outFile.absolutePath
+                            if (wantBugLogo && logoPathEsc != null && needPanel) {
+                                val filter = buildString {
+                                    append("[0:v]scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                    if (dividerRight) {
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                    }
+                                    append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'[withsubs];")
+
+                                    val base = minOf(w, h)
+                                    val sizePx = if (branding.sizeMode.equals("FIXED", true))
+                                        branding.sizeValue.toInt().coerceAtLeast(16)
+                                    else
+                                        (base * branding.sizeValue).toInt().coerceAtLeast(24)
+
+                                    if (branding.plate.enabled) {
+                                        val plateColor = colorForDrawbox(
+                                            branding.plate.colorHex.removePrefix("#"),
+                                            branding.plate.opacity
+                                        )
+                                        val padP = branding.plate.paddingPx.coerceAtLeast(0)
+                                        append("movie='${logoPathEsc}',scale=-1:$sizePx,")
+                                        append("pad=iw+${padP * 2}:ih+${padP * 2}:$padP:$padP:color=$plateColor[logo];")
+                                    } else {
+                                        append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
+                                    }
+                                    append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout]")
+                                }
+                                cmd.addAll(
+                                    listOf(
+                                        "-filter_complex", filter,
+                                        "-map", "[vout]", "-map", "1:a",
+                                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                        "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                        "-movflags", "+faststart", "-shortest",
+                                        outFile.absolutePath
+                                    )
                                 )
-                            )
+                            } else {
+                                val vf = buildString {
+                                    append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                                    if (needPanel) {
+                                        append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                        append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                        append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                        if (dividerRight) {
+                                            append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                        }
+                                    } else {
+                                        append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                                    }
+                                    append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
+                                }
+
+                                cmd.addAll(
+                                    listOf(
+                                        "-vf", vf,
+                                        "-map", "0:v", "-map", "1:a",
+                                        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                        "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                        "-movflags", "+faststart", "-shortest",
+                                        outFile.absolutePath
+                                    )
+                                )
+                            }
                         }
                     } else {
                         val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
@@ -293,26 +392,81 @@ fun Application.configureVideoJobsRouting() {
                         inputs += listOf("-i", audioFile.absolutePath) // #1
                         cmd.addAll(inputs)
 
-                        val vf = buildString {
-                            append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
-                            append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
-                            if (needPanel) {
-                                val color = colorForDrawbox(panelColorHex, panelOpacity)
-                                append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$color:t=fill,")
-                            }
-                            append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
-                        }
+                        val sceneW = (w - panelWidthPx).coerceAtLeast(1)
+                        val colorPanel = colorForDrawbox(panelColorHex, panelOpacity)
 
-                        cmd.addAll(
-                            listOf(
-                                "-vf", vf,
-                                "-map", "0:v", "-map", "1:a",
-                                "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                                "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
-                                "-movflags", "+faststart", "-shortest",
-                                outFile.absolutePath
+                        if (wantBugLogo && logoPathEsc != null && needPanel) {
+                            val filter = buildString {
+                                append("[0:v]scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                                if (needPanel) {
+                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                    if (dividerRight) {
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                    }
+                                } else {
+                                    append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                                }
+                                append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'[withsubs];")
+
+                                val base = minOf(w, h)
+                                val sizePx = if (branding.sizeMode.equals("FIXED", true))
+                                    branding.sizeValue.toInt().coerceAtLeast(16)
+                                else
+                                    (base * branding.sizeValue).toInt().coerceAtLeast(24)
+
+                                if (branding.plate.enabled) {
+                                    val plateColor = colorForDrawbox(
+                                        branding.plate.colorHex.removePrefix("#"),
+                                        branding.plate.opacity
+                                    )
+                                    val padP = branding.plate.paddingPx.coerceAtLeast(0)
+                                    append("movie='${logoPathEsc}',scale=-1:$sizePx,")
+                                    append("pad=iw+${padP * 2}:ih+${padP * 2}:$padP:$padP:color=$plateColor[logo];")
+                                } else {
+                                    append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
+                                }
+                                append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout]")
+                            }
+
+                            cmd.addAll(
+                                listOf(
+                                    "-filter_complex", filter,
+                                    "-map", "[vout]", "-map", "1:a",
+                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                    "-movflags", "+faststart", "-shortest",
+                                    outFile.absolutePath
+                                )
                             )
-                        )
+                        } else {
+                            val vf = buildString {
+                                append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
+                                if (needPanel) {
+                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                    if (dividerRight) {
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                    }
+                                } else {
+                                    append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                                }
+                                append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'")
+                            }
+
+                            cmd.addAll(
+                                listOf(
+                                    "-vf", vf,
+                                    "-map", "0:v", "-map", "1:a",
+                                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                    "-movflags", "+faststart", "-shortest",
+                                    outFile.absolutePath
+                                )
+                            )
+                        }
                     }
 
                     log.info("VideoRender: ffmpeg command: {}", cmd.joinToString(" "))
