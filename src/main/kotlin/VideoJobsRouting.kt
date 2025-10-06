@@ -87,7 +87,7 @@ fun Application.configureVideoJobsRouting() {
 
                     val panelSpec = req.render.panel ?: PanelSpec()
                     val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceAtLeast(200)
-                    val visibleLinesPanel = req.render.visibleLines ?: 9
+                    val visibleLinesPanel = req.render.visibleLines ?: 12
 
                     when (resolvedLayout) {
                         TextLayout.VERTICAL_ONE -> {
@@ -228,14 +228,13 @@ fun Application.configureVideoJobsRouting() {
                                 append(prep.filterComplex)
 
                                 if (needPanel) {
-                                    append("${prep.videoOutLabel}crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("${prep.videoOutLabel}crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
                                         append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
                                     }
                                     append("format=yuv420p[fbase];")
-                                    // накладываем субтитры (шапка+контент в одном .ass)
                                     append("[fbase]subtitles='${assPathEsc}'[withsubs];")
                                 } else {
                                     append("${prep.videoOutLabel}subtitles='${assPathEsc}'[withsubs];")
@@ -308,7 +307,7 @@ fun Application.configureVideoJobsRouting() {
                             if (wantBugLogo && logoPathEsc != null && needPanel) {
                                 val filter = buildString {
                                     append("[0:v]scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
-                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
@@ -349,7 +348,7 @@ fun Application.configureVideoJobsRouting() {
                                 val vf = buildString {
                                     append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
                                     if (needPanel) {
-                                        append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                        append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
                                         append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                         append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                         if (dividerRight) {
@@ -399,7 +398,7 @@ fun Application.configureVideoJobsRouting() {
                             val filter = buildString {
                                 append("[0:v]scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
                                 if (needPanel) {
-                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
@@ -444,7 +443,7 @@ fun Application.configureVideoJobsRouting() {
                             val vf = buildString {
                                 append("scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
                                 if (needPanel) {
-                                    append("crop=w=$sceneW:h=$h:x=iw-$sceneW:y=0,")
+                                    append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {

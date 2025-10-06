@@ -473,7 +473,7 @@ object AssBuilder {
 
         val hdrTitleSize = (style.fontSizePx * 0.78).roundToInt().coerceAtLeast(22)
         val hdrMetaSize  = (style.fontSizePx * 0.56).roundToInt().coerceAtLeast(16)
-        val headerReservedH = if (shouldRenderHeader(metaHeader)) (hdrTitleSize + 10 + hdrMetaSize + 16) else 0
+        val headerReservedH = if (shouldRenderHeader(metaHeader)) (hdrTitleSize + 16 + hdrMetaSize + 20) else 0
         val baseY = padT + headerReservedH
 
         val avgCharPxBold = max(7.0, style.fontSizePx * 0.50)
@@ -513,13 +513,23 @@ object AssBuilder {
 
         data class Seg(val text: String, val start: Long, val end: Long)
 
+// считаем «жёсткие» строки на каждое предложение и индекс первого сегмента предложения
         val segs = ArrayList<Seg>(lines.size * 2)
+        val partsPerSentence = IntArray(lines.size) { 0 }
+        val sentenceStartSegIdx = IntArray(lines.size) { 0 }
+
+        var segCursor = 0
         for (i in lines.indices) {
             val t0 = cues.items[i].startMs
             val t1 = cues.items[i].endMs
             if (t1 <= t0) continue
+
             val parts = wrapHard(lines[i])
             if (parts.isEmpty()) continue
+
+            sentenceStartSegIdx[i] = segCursor
+            partsPerSentence[i] = parts.size
+
             val totalChars = parts.sumOf { it.length }.coerceAtLeast(1)
             var acc = 0
             for (p in parts) {
@@ -528,8 +538,10 @@ object AssBuilder {
                 val st = t0 + ((t1 - t0) * prev.toDouble() / totalChars).toLong()
                 val en = t0 + ((t1 - t0) * acc.toDouble() / totalChars).toLong()
                 segs += Seg(p, st, max(st + 1, en))
+                segCursor++
             }
         }
+
         if (segs.isEmpty()) {
             target.writeText("")
             return
@@ -537,14 +549,37 @@ object AssBuilder {
 
         data class Page(val fromIdx: Int, val toIdx: Int, val tStart: Long, val tEnd: Long)
         val pages = mutableListOf<Page>()
-        var i = 0
-        while (i < segs.size) {
-            val from = i
-            val to = min(segs.lastIndex, i + visibleLines - 1)
-            val tStart = segs[from].start
-            val tEnd = (from..to).maxOf { segs[it].end }
-            pages += Page(from, to, tStart, tEnd)
-            i = to + 1
+
+        var sent = 0
+        while (sent < lines.size) {
+            val partsThis = partsPerSentence[sent].coerceAtLeast(1)
+            var fromSeg = sentenceStartSegIdx[sent]
+            var toSeg = fromSeg + partsThis - 1
+
+            if (partsThis > visibleLines) {
+                val tStart = segs[fromSeg].start
+                val tEnd = (fromSeg..toSeg).maxOf { segs[it].end }
+                pages += Page(fromSeg, toSeg, tStart, tEnd)
+                sent++
+                continue
+            }
+
+            var used = partsThis
+            var s2 = sent + 1
+            while (s2 < lines.size) {
+                val need = partsPerSentence[s2].coerceAtLeast(1)
+                if (used + need > visibleLines) break
+                val addFrom = sentenceStartSegIdx[s2]
+                val addTo = addFrom + need - 1
+                toSeg = addTo
+                used += need
+                s2++
+            }
+
+            val tStart = segs[fromSeg].start
+            val tEnd = (fromSeg..toSeg).maxOf { segs[it].end }
+            pages += Page(fromSeg, toSeg, tStart, tEnd)
+            sent = s2
         }
 
         fun stylePanelLine(name: String, ls: OverlayLineStyle, forceBold: Boolean, alignCode: Int, marginV: Int) =
