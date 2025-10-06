@@ -184,9 +184,7 @@ fun Application.configureVideoJobsRouting() {
                     val dividerRight: Boolean = req.render.panel?.background?.dividerRight ?: true
 
                     val branding = req.render.branding
-                    val wantBugLogo = branding.show
-                            && branding.logoUrl?.isNotBlank() == true
-                            && branding.placement.equals("TOP_RIGHT_BUG", ignoreCase = true)
+                    val wantBugLogo = branding.show && branding.logoUrl?.isNotBlank() == true
 
                     var logoPathEsc: String? = null
                     if (wantBugLogo) {
@@ -200,6 +198,17 @@ fun Application.configureVideoJobsRouting() {
 
                     fun colorForDrawbox(hexNoHash: String, alpha: Double): String =
                         "0x$hexNoHash@${alpha.coerceIn(0.0, 1.0)}"
+
+                    fun overlayXY(w: Int, h: Int, b: BrandingSpec): String {
+                        val m = b.marginPx
+                        return when (b.placement.uppercase()) {
+                            "TOP_LEFT_BUG" -> "x=$m:y=$m"
+                            "TOP_RIGHT_BUG" -> "x=main_w-overlay_w-$m:y=$m"
+                            "BOTTOM_LEFT_BUG" -> "x=$m:y=main_h-overlay_h-$m"
+                            "BOTTOM_RIGHT_BUG" -> "x=main_w-overlay_w-$m:y=main_h-overlay_h-$m"
+                            else -> "x=main_w-overlay_w-$m:y=$m"
+                        }
+                    }
 
                     if (spans.isNotEmpty()) {
                         val prep = BackgroundSpansFfmpeg.prepare(
@@ -258,7 +267,7 @@ fun Application.configureVideoJobsRouting() {
                                     } else {
                                         append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                     }
-                                    append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout];")
+                                    append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout];")
                                 } else {
                                     append("[withsubs]format=yuv420p[vout];")
                                 }
@@ -332,7 +341,7 @@ fun Application.configureVideoJobsRouting() {
                                     } else {
                                         append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                     }
-                                    append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout]")
+                                    append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout]")
                                 }
                                 cmd.addAll(
                                     listOf(
@@ -426,7 +435,7 @@ fun Application.configureVideoJobsRouting() {
                                 } else {
                                     append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                 }
-                                append("[withsubs][logo]overlay=x=main_w-overlay_w-${branding.marginPx}:y=${branding.marginPx}[vout]")
+                                append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout]")
                             }
 
                             cmd.addAll(
