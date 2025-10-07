@@ -87,7 +87,7 @@ fun Application.configureVideoJobsRouting() {
 
                     val panelSpec = req.render.panel ?: PanelSpec()
                     val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceAtLeast(200)
-                    val visibleLinesPanel = req.render.visibleLines ?: 12
+                    val visibleLinesPanel: Int? = if (resolvedLayout == TextLayout.PANEL_LEFT) req.render.visibleLines else null
 
                     when (resolvedLayout) {
                         TextLayout.VERTICAL_ONE -> {
@@ -112,7 +112,7 @@ fun Application.configureVideoJobsRouting() {
                                 height = h,
                                 panelWidthPx = panelWidthPx,
                                 panelInnerPaddingPx = panelSpec.innerPaddingPx,
-                                visibleLines = visibleLinesPanel,
+                                visibleLines = visibleLinesPanel ?: error("visibleLines is required when layout=PANEL_LEFT"),
                                 metaHeader = req.render.metaHeader
                             )
                         }
@@ -184,7 +184,9 @@ fun Application.configureVideoJobsRouting() {
                     val dividerRight: Boolean = req.render.panel?.background?.dividerRight ?: true
 
                     val branding = req.render.branding
-                    val wantBugLogo = branding.show && branding.logoUrl?.isNotBlank() == true
+                    val wantBugLogo = branding.show &&
+                            (branding.logoUrl?.isNotBlank() == true) &&
+                            (branding.placement.uppercase().endsWith("_BUG"))
 
                     var logoPathEsc: String? = null
                     if (wantBugLogo) {
