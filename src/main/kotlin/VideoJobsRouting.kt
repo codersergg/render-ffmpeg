@@ -11,6 +11,7 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -87,7 +88,8 @@ fun Application.configureVideoJobsRouting() {
 
                     val panelSpec = req.render.panel ?: PanelSpec()
                     val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceAtLeast(200)
-                    val visibleLinesPanel: Int? = if (resolvedLayout == TextLayout.PANEL_LEFT) req.render.visibleLines else null
+                    val visibleLinesPanel: Int? =
+                        if (resolvedLayout == TextLayout.PANEL_LEFT) req.render.visibleLines else null
 
                     when (resolvedLayout) {
                         TextLayout.VERTICAL_ONE -> {
@@ -112,7 +114,8 @@ fun Application.configureVideoJobsRouting() {
                                 height = h,
                                 panelWidthPx = panelWidthPx,
                                 panelInnerPaddingPx = panelSpec.innerPaddingPx,
-                                visibleLines = visibleLinesPanel ?: error("visibleLines is required when layout=PANEL_LEFT"),
+                                visibleLines = visibleLinesPanel
+                                    ?: error("visibleLines is required when layout=PANEL_LEFT"),
                                 metaHeader = req.render.metaHeader
                             )
                         }
@@ -207,17 +210,17 @@ fun Application.configureVideoJobsRouting() {
                         panelWidthPx: Int
                     ): String {
                         val m = b.marginPx
-                        val leftX  = if (needPanel) panelWidthPx + m else m
+                        val leftX = if (needPanel) panelWidthPx + m else m
                         val rightX = "main_w-overlay_w-$m"
-                        val topY   = m
-                        val botY   = "main_h-overlay_h-$m"
+                        val topY = m
+                        val botY = "main_h-overlay_h-$m"
 
                         return when (b.placement.uppercase()) {
-                            "TOP_LEFT_BUG"     -> "x=$leftX:y=$topY"
-                            "TOP_RIGHT_BUG"    -> "x=$rightX:y=$topY"
-                            "BOTTOM_LEFT_BUG"  -> "x=$leftX:y=$botY"
+                            "TOP_LEFT_BUG" -> "x=$leftX:y=$topY"
+                            "TOP_RIGHT_BUG" -> "x=$rightX:y=$topY"
+                            "BOTTOM_LEFT_BUG" -> "x=$leftX:y=$botY"
                             "BOTTOM_RIGHT_BUG" -> "x=$rightX:y=$botY"
-                            else               -> "x=$rightX:y=$topY"
+                            else -> "x=$rightX:y=$topY"
                         }
                     }
 
@@ -526,13 +529,84 @@ fun Application.configureVideoJobsRouting() {
         get("/video/jobs/{id}/file") {
             val id = call.parameters["id"]!!
             val job = VideoJobManager.get(id) ?: return@get call.respond(HttpStatusCode.NotFound)
-            val f = job.outputFile ?: return@get call.respond(HttpStatusCode.NotFound)
-            if (job.status != JobStatus.SUCCEEDED || !f.exists()) {
-                return@get call.respond(HttpStatusCode.BadRequest, "job not finished")
+
+            val f = job.outputFile
+                ?: return@get call.respond(HttpStatusCode.NotFound, "no output for job $id")
+
+            val exists = f.exists()
+            val len = runCatching { f.length() }.getOrElse { -1L }
+
+            log.info(
+                "[/video/jobs/{}/file] method={} remote={} ua='{}' status={} file='{}' exists={} size={}",
+                id,
+                call.request.httpMethod.value,
+                call.request.origin.remoteHost,
+                call.request.headers["User-Agent"] ?: "",
+                job.status,
+                f.absolutePath,
+                exists,
+                len
+            )
+
+            if (job.status != JobStatus.SUCCEEDED || !exists) {
+                return@get call.respond(
+                    HttpStatusCode.BadRequest,
+                    "job not finished or file missing (status=${job.status}, exists=$exists)"
+                )
+            }
+            if (len <= 0L) {
+                log.warn("[/video/jobs/{}/file] zero-length file detected", id)
+                return@get call.respond(HttpStatusCode.InternalServerError, "rendered file has zero length")
             }
 
-            call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"episode-$id.mp4\"")
-            call.respondFile(f)
+            call.response.headers.append(HttpHeaders.ContentType, ContentType.Video.MP4.toString(), false)
+            call.response.headers.append(
+                HttpHeaders.ContentDisposition,
+                "attachment; filename=\"episode-$id.mp4\"",
+                false
+            )
+            call.response.headers.append(HttpHeaders.ContentLength, len.toString(), false)
+            call.response.headers.append(HttpHeaders.CacheControl, "no-store", false)
+            call.response.headers.append(HttpHeaders.AcceptRanges, "bytes", false)
+
+            val startedAt = System.currentTimeMillis()
+            var sent = 0L
+
+            try {
+                call.respondOutputStream(status = HttpStatusCode.OK) {
+                    f.inputStream().use { input ->
+                        val buf = ByteArray(128 * 1024)
+                        var lastLog = startedAt
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            this.write(buf, 0, n)
+                            sent += n
+
+                            val now = System.currentTimeMillis()
+                            if (now - lastLog >= 1500) {
+                                log.info(
+                                    "[/video/jobs/{}/file] progress: sent={} of {} ({}%)",
+                                    id, sent, len, (sent * 100 / len)
+                                )
+                                lastLog = now
+                            }
+                        }
+                        this.flush()
+                    }
+                }
+                val took = System.currentTimeMillis() - startedAt
+                log.info(
+                    "[/video/jobs/{}/file] completed: sent={}B of {}B in {}ms",
+                    id, sent, len, took
+                )
+            } catch (t: Throwable) {
+                log.error(
+                    "[/video/jobs/{}/file] streaming failed after {}B (len={}): {}",
+                    id, sent, len, t.toString(), t
+                )
+                throw t
+            }
         }
     }
 }
