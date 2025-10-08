@@ -191,7 +191,7 @@ fun Application.configureVideoJobsRouting() {
                     var logoPathEsc: String? = null
                     if (wantBugLogo) {
                         val logoFile = File(tmpDir, "branding-logo.png")
-                        client.get(branding.logoUrl!!).apply {
+                        client.get(branding.logoUrl).apply {
                             if (!status.isSuccess()) error("logo download failed: $status")
                             bodyAsChannel().copyTo(logoFile.outputStream())
                         }
@@ -201,14 +201,23 @@ fun Application.configureVideoJobsRouting() {
                     fun colorForDrawbox(hexNoHash: String, alpha: Double): String =
                         "0x$hexNoHash@${alpha.coerceIn(0.0, 1.0)}"
 
-                    fun overlayXY(w: Int, h: Int, b: BrandingSpec): String {
+                    fun overlayXY(
+                        b: BrandingSpec,
+                        needPanel: Boolean,
+                        panelWidthPx: Int
+                    ): String {
                         val m = b.marginPx
+                        val leftX  = if (needPanel) panelWidthPx + m else m
+                        val rightX = "main_w-overlay_w-$m"
+                        val topY   = m
+                        val botY   = "main_h-overlay_h-$m"
+
                         return when (b.placement.uppercase()) {
-                            "TOP_LEFT_BUG" -> "x=$m:y=$m"
-                            "TOP_RIGHT_BUG" -> "x=main_w-overlay_w-$m:y=$m"
-                            "BOTTOM_LEFT_BUG" -> "x=$m:y=main_h-overlay_h-$m"
-                            "BOTTOM_RIGHT_BUG" -> "x=main_w-overlay_w-$m:y=main_h-overlay_h-$m"
-                            else -> "x=main_w-overlay_w-$m:y=$m"
+                            "TOP_LEFT_BUG"     -> "x=$leftX:y=$topY"
+                            "TOP_RIGHT_BUG"    -> "x=$rightX:y=$topY"
+                            "BOTTOM_LEFT_BUG"  -> "x=$leftX:y=$botY"
+                            "BOTTOM_RIGHT_BUG" -> "x=$rightX:y=$botY"
+                            else               -> "x=$rightX:y=$topY"
                         }
                     }
 
@@ -269,7 +278,7 @@ fun Application.configureVideoJobsRouting() {
                                     } else {
                                         append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                     }
-                                    append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout];")
+                                    append("[withsubs][logo]overlay=${overlayXY(branding, needPanel, panelWidthPx)}[vout];")
                                 } else {
                                     append("[withsubs]format=yuv420p[vout];")
                                 }
@@ -343,7 +352,7 @@ fun Application.configureVideoJobsRouting() {
                                     } else {
                                         append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                     }
-                                    append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout]")
+                                    append("[withsubs][logo]overlay=${overlayXY(branding, needPanel, panelWidthPx)}[vout]")
                                 }
                                 cmd.addAll(
                                     listOf(
@@ -408,15 +417,11 @@ fun Application.configureVideoJobsRouting() {
                         if (wantBugLogo && logoPathEsc != null && needPanel) {
                             val filter = buildString {
                                 append("[0:v]scale=w=$w:h=$h:force_original_aspect_ratio=decrease,")
-                                if (needPanel) {
-                                    append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
-                                    append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
-                                    append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
-                                    if (dividerRight) {
-                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
-                                    }
-                                } else {
-                                    append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
+                                append("crop=w=$sceneW:h=$h:x=(iw-$sceneW)/2:y=(ih-$h)/2,")
+                                append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
+                                append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
+                                if (dividerRight) {
+                                    append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
                                 }
                                 append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'[withsubs];")
 
@@ -437,7 +442,7 @@ fun Application.configureVideoJobsRouting() {
                                 } else {
                                     append("movie='${logoPathEsc}',scale=-1:$sizePx[logo];")
                                 }
-                                append("[withsubs][logo]overlay=${overlayXY(w, h, branding)}[vout]")
+                                append("[withsubs][logo]overlay=${overlayXY(branding, needPanel, panelWidthPx)}[vout]")
                             }
 
                             cmd.addAll(
@@ -521,11 +526,13 @@ fun Application.configureVideoJobsRouting() {
         get("/video/jobs/{id}/file") {
             val id = call.parameters["id"]!!
             val job = VideoJobManager.get(id) ?: return@get call.respond(HttpStatusCode.NotFound)
-            if (job.status != JobStatus.SUCCEEDED || job.outputFile?.exists() != true) {
+            val f = job.outputFile ?: return@get call.respond(HttpStatusCode.NotFound)
+            if (job.status != JobStatus.SUCCEEDED || !f.exists()) {
                 return@get call.respond(HttpStatusCode.BadRequest, "job not finished")
             }
-            call.response.headers.append(HttpHeaders.ContentDisposition, "attachment; filename=\"episode-$id.mp4\"")
-            call.respondFile(job.outputFile!!)
+
+            call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"episode-$id.mp4\"")
+            call.respondFile(f)
         }
     }
 }
