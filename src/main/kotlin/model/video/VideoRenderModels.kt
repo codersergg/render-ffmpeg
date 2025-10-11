@@ -157,8 +157,8 @@ data class PanelTextureSpec(
 @Serializable
 data class PanelBackground(
     val mode: PanelBackgroundMode = PanelBackgroundMode.SOLID,
-    val colorHex: String = "#0E0F13",
-    val opacity: Double = 1.0,
+    val colorHex: String = "#141416",
+    val opacity: Double = 0.96,
     val gradient: GradientSpec? = null,
     val texture: PanelTextureSpec? = null,
     val dividerRight: Boolean = true
@@ -185,7 +185,8 @@ data class MetaHeaderSpec(
     val separatorOpacity: Double? = null,
     val separatorColorHex: String? = null,
     val headerTitleColorHex: String? = null,
-    val headerMetaColorHex: String? = null
+    val headerMetaColorHex: String? = null,
+    val allowTwoLineTitleInPanel: Boolean? = null
 )
 
 @Serializable

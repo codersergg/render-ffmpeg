@@ -10,7 +10,6 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 object AssBuilder {
-    // ======== ГОРИЗОНТАЛЬ + хореография ========
     fun buildAssFile(
         target: File,
         cues: EpisodeCuesPayload,
@@ -56,9 +55,7 @@ object AssBuilder {
             if (words.isEmpty()) return ""
             val sb = StringBuilder()
             var curLen = 0
-            fun nl() {
-                sb.append("\\N"); curLen = 0
-            }
+            fun nl() { sb.append("\\N"); curLen = 0 }
             for (w in words) {
                 if (w.length > maxChars) {
                     var i = 0
@@ -140,8 +137,7 @@ object AssBuilder {
             if (parts.size <= 1) return Two(parts.firstOrNull().orEmpty(), null)
 
             val aWords = parts[0].trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
-            val bWords =
-                parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
+            val bWords = parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
 
             val minTailWords = 2
             fun chars(lst: List<String>) = lst.sumOf { it.length } + (lst.size - 1).coerceAtLeast(0)
@@ -152,10 +148,7 @@ object AssBuilder {
                 return cb / sum
             }
 
-            while (
-                (bWords.size < minTailWords || ratioB(aWords, bWords) < 0.35) &&
-                aWords.size > minTailWords
-            ) {
+            while ((bWords.size < minTailWords || ratioB(aWords, bWords) < 0.35) && aWords.size > minTailWords) {
                 val moved = aWords.removeAt(aWords.size - 1)
                 bWords.add(0, moved)
             }
@@ -294,21 +287,12 @@ object AssBuilder {
                     val nextText = expandedLines[j + 1]
                     val nextInStart = t(j)
                     val nextInEnd = min(totalMs, t(j) + shiftMs)
-                    add(
-                        1,
-                        nextInStart,
-                        nextInEnd,
-                        "next",
-                        moveTag(yBelow, yBottom, (nextInEnd - nextInStart)),
-                        nextText
-                    )
+                    add(1, nextInStart, nextInEnd, "next", moveTag(yBelow, yBottom, (nextInEnd - nextInStart)), nextText)
                     add(1, nextInEnd, t(j + 1), "next", posTag(yBottom), nextText)
                 }
             }
         })
     }
-
-    // ======== ВЕРТИКАЛЬ ( + metaHeader) ========
 
     fun buildAssFileVerticalInstant(
         target: File,
@@ -334,14 +318,7 @@ object AssBuilder {
             append("Style: $name,${style.fontFamily},${style.fontSizePx},")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("${if (forceBold) -1 else 0},0,0,0,100,100,0,0,1,2,$shadow,")
-            append(
-                "2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${
-                    max(
-                        64,
-                        (height * 0.12).roundToInt()
-                    )
-                },0"
-            )
+            append("2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${max(64, (height * 0.12).roundToInt())},0")
         }
 
         val totalMs = max(1L, cues.totalMs)
@@ -386,9 +363,7 @@ object AssBuilder {
             if (words.isEmpty()) return ""
             val sb = StringBuilder()
             var curLen = 0
-            fun nl() {
-                sb.append("\\N"); curLen = 0
-            }
+            fun nl() { sb.append("\\N"); curLen = 0 }
             for (w in words) {
                 if (w.length > maxChars) {
                     var i = 0
@@ -472,13 +447,6 @@ object AssBuilder {
         })
     }
 
-    /**
-     * Левая панель (режим REPLACE):
-     * - перенос по ширине панели;
-     * - отображаем до visibleLines полностью помещающихся строк (жёсткий перенос);
-     * - страница активна до конца последней строки, потом полная замена;
-     * - текущая строка на странице подсвечивается (cur), остальные — полупрозрачные (dim).
-     */
     fun buildAssFilePanelLeftReplace(
         target: File,
         cues: EpisodeCuesPayload,
@@ -508,7 +476,7 @@ object AssBuilder {
         val padT = padTBase + padExtra
 
         val availTextW = (panelWidthPx - padL - padR).coerceAtLeast(120)
-        val lineStep = max(20, (style.fontSizePx * 1.35).roundToInt()) // чуть плотнее, чем в BLUR
+        val lineStep = max(20, (style.fontSizePx * 1.35).roundToInt())
 
         val hdrTitleSize = (style.fontSizePx * 0.78).roundToInt().coerceAtLeast(22)
         val hdrMetaSize = (style.fontSizePx * 0.56).roundToInt().coerceAtLeast(16)
@@ -519,6 +487,11 @@ object AssBuilder {
             (titleLines * titleLineH) + 10 + hdrMetaSize + 20
         else 0
         val baseY = padT + headerReservedH
+
+        val sepColor = (metaHeader?.separatorColorHex ?: "#FFFFFF")
+        val sepOpacity = (metaHeader?.separatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
+        val sepHeight = (metaHeader?.separatorHeightPx ?: 2).coerceAtLeast(0)
+        val sepEnabled = (metaHeader?.separatorEnabled ?: true) && sepHeight > 0
 
         val avgCharPxBold = max(7.0, style.fontSizePx * 0.50)
         val outlineOverhead = 2 * 0.6
@@ -531,9 +504,7 @@ object AssBuilder {
             var cur = StringBuilder()
             var curLen = 0
             fun flush() {
-                if (curLen > 0) {
-                    out += cur.toString(); cur = StringBuilder(); curLen = 0
-                }
+                if (curLen > 0) { out += cur.toString(); cur = StringBuilder(); curLen = 0 }
             }
             for (w in words) {
                 if (w.length > maxChars) {
@@ -567,13 +538,12 @@ object AssBuilder {
                 var placed = false
                 while (!placed) {
                     val cur = out.last()
-                    val cand = if (cur.isEmpty()) w else cur.toString() + " " + w
-                    if (wrapHard(cand).size <= 1) { // вписывается в строку панели
+                    val cand = if (cur.isEmpty()) w else "$cur $w"
+                    if (wrapHard(cand).size <= 1) {
                         cur.clear(); cur.append(cand); placed = true
                     } else {
-                        if (out.size >= maxLines) { // переполнение — мягко обрезаем
-                            cur.append(" ").append(w)
-                            placed = true
+                        if (out.size >= maxLines) {
+                            cur.append(" ").append(w); placed = true
                         } else {
                             out += StringBuilder()
                         }
@@ -672,7 +642,7 @@ object AssBuilder {
             append("Style: hdrP,${style.fontFamily},$hdrTitleSize,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("-1,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
-            append("7,$padL,0,$padT,0") // top-left в панели
+            append("7,$padL,0,$padT,0")
         }
 
         fun styleHeaderMetaPanel() = buildString {
@@ -681,6 +651,13 @@ object AssBuilder {
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
             append("7,$padL,0,${padT + hdrTitleSize + 10},0")
+        }
+
+        fun styleHeaderSeparatorPanel() = buildString {
+            val sep = rgbaToAss(sepOpacity, sepColor)
+            append("Style: hdrPSep,${style.fontFamily},1,")
+            append("$sep,&H000000FF,&H00000000,&H00000000,")
+            append("0,0,0,0,0,0,0,0,1,2,0,7,$padL,0,${padT + hdrTitleSize + hdrMetaSize + 14},0")
         }
 
         target.writeText(buildString {
@@ -704,6 +681,7 @@ object AssBuilder {
             if (shouldRenderHeader(metaHeader)) {
                 appendLine(styleHeaderTitlePanel())
                 appendLine(styleHeaderMetaPanel())
+                if (sepEnabled) appendLine(styleHeaderSeparatorPanel())
             }
             appendLine()
 
@@ -721,13 +699,7 @@ object AssBuilder {
 
             fun add(styleName: String, t0: Long, t1: Long, x: Int, y: Int, text: String, layer: Int) {
                 if (t1 <= t0 || text.isBlank()) return
-                appendLine(
-                    "Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${
-                        esc(
-                            text
-                        )
-                    }"
-                )
+                appendLine("Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${esc(text)}")
             }
 
             if (shouldRenderHeader(metaHeader)) {
@@ -736,6 +708,12 @@ object AssBuilder {
                 val chips = buildChips(metaHeader)
                 add("hdrP", 0, totalMs, padL, padT, title, 3)
                 if (chips.isNotEmpty()) add("hdrPMeta", 0, totalMs, padL, padT + hdrTitleSize + 10, chips, 3)
+
+                if (sepEnabled) {
+                    val sepY = padT + titleLines * titleLineH + 10 + hdrMetaSize + 14
+                    val path = "m 0 0 l $availTextW 0 l $availTextW $sepHeight l 0 $sepHeight"
+                    appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrPSep,,0,0,0,,{\\q2\\an7\\p1\\pos($padL,$sepY)}$path")
+                }
             }
 
             for (pg in pages) {
@@ -753,8 +731,6 @@ object AssBuilder {
             }
         })
     }
-
-    // ======== УТИЛИТЫ ========
 
     private fun rgbaToAss(opacity: Double, hex: String): String {
         val a = (255.0 - (opacity.coerceIn(0.0, 1.0) * 255.0)).toInt().coerceIn(0, 255)

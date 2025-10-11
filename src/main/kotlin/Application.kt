@@ -5,6 +5,7 @@ import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
+import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 fun main() {
@@ -15,7 +16,12 @@ fun Application.module() {
     val log = LoggerFactory.getLogger("StartupTest")
     log.info(">>> Test log from module")
     install(ContentNegotiation) {
-        json()
+        json(
+            Json {
+                ignoreUnknownKeys = true
+                encodeDefaults = true
+            }
+        )
     }
 
     configureRouting()
