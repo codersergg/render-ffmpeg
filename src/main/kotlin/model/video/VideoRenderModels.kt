@@ -179,7 +179,13 @@ data class MetaHeaderSpec(
     val storyTitle: String? = null,
     val level: String? = null,
     val languageName: String? = null,
-    val allowTwoLineTitleInPanel: Boolean = true
+    val paddingTopExtraPx: Int? = null,
+    val separatorEnabled: Boolean? = null,
+    val separatorHeightPx: Int? = null,
+    val separatorOpacity: Double? = null,
+    val separatorColorHex: String? = null,
+    val headerTitleColorHex: String? = null,
+    val headerMetaColorHex: String? = null
 )
 
 @Serializable

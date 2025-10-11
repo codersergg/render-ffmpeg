@@ -91,12 +91,22 @@ object AssBuilder {
         val headerAlignCode = 7
         val headerMarginL = max(24, style.paddingLeft)
         val headerMarginR = style.paddingRight
-        val headerMarginV = max(24, style.paddingTop)
+
+        val padExtra = (metaHeader?.paddingTopExtraPx ?: 0).coerceAtLeast(0)
+        val headerMarginV = max(24, style.paddingTop) + padExtra
+
         val headerFontTitle = (style.fontSizePx * 0.8).roundToInt().coerceAtLeast(24)
         val headerFontMeta  = (style.fontSizePx * 0.55).roundToInt().coerceAtLeast(18)
 
+        val titleColor = (metaHeader?.headerTitleColorHex ?: "#FFFFFF")
+        val metaColor  = (metaHeader?.headerMetaColorHex  ?: "#FFFFFF")
+        val sepColor   = (metaHeader?.separatorColorHex   ?: "#FFFFFF")
+        val sepOpacity = (metaHeader?.separatorOpacity    ?: 0.50).coerceIn(0.0, 1.0)
+        val sepHeight  = (metaHeader?.separatorHeightPx   ?: 2).coerceAtLeast(0)
+        val sepEnabled = (metaHeader?.separatorEnabled    ?: true) && sepHeight > 0
+
         fun styleHeaderTitle() = buildString {
-            val primary = rgbaToAss(1.0, "#FFFFFF")
+            val primary = rgbaToAss(1.0, titleColor)
             append("Style: hdr,${style.fontFamily},$headerFontTitle,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("-1,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
@@ -104,11 +114,18 @@ object AssBuilder {
         }
 
         fun styleHeaderMeta() = buildString {
-            val primary = rgbaToAss(0.95, "#FFFFFF")
+            val primary = rgbaToAss(0.95, metaColor)
             append("Style: hdrMeta,${style.fontFamily},$headerFontMeta,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
             append("$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + 10},0")
+        }
+
+        fun styleHeaderSeparator() = buildString {
+            val sep = rgbaToAss(sepOpacity, sepColor)
+            append("Style: hdrSep,${style.fontFamily},1,")
+            append("$sep,&H000000FF,&H00000000,&H00000000,")
+            append("0,0,0,0,0,0,0,0,1,2,0,$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
         }
 
         val totalMs = max(1L, cues.totalMs)
@@ -117,10 +134,10 @@ object AssBuilder {
         fun splitTwo(text: String): Two {
             val wrapped = hardWrap(text, isBold = true)
             val parts = wrapped.split("\\N")
-            if (parts.isEmpty() || parts.size == 1) return Two(parts.firstOrNull().orEmpty(), null)
+            if (parts.size <= 1) return Two(parts.firstOrNull().orEmpty(), null)
 
-            var aWords = parts[0].trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
-            var bWords = parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
+            val aWords = parts[0].trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
+            val bWords = parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
 
             val minTailWords = 2
             fun chars(lst: List<String>) = lst.sumOf { it.length } + (lst.size - 1).coerceAtLeast(0)
@@ -162,8 +179,8 @@ object AssBuilder {
                 val lenA = cur.a.length.toDouble().coerceAtLeast(1.0)
                 val lenB = cur.b.length.toDouble().coerceAtLeast(1.0)
                 val ratio = (lenA / (lenA + lenB)).coerceIn(0.35, 0.65)
-                val dur = (t1 - t0).coerceAtLeast(2L * 240)
-                val tMid = (t0 + (dur * ratio)).toLong().coerceIn(t0 + 240, t1 - 240)
+                val dur = (t1 - t0).coerceAtLeast(2L * shiftMs)
+                val tMid = (t0 + (dur * ratio)).toLong().coerceIn(t0 + shiftMs, t1 - shiftMs)
 
                 expandedStarts += t0
                 expandedLines  += cur.a
@@ -192,18 +209,9 @@ object AssBuilder {
             appendLine(styleLine("cur",    style.current,  forceBold = true,  minOpacity = 1.00))
             appendLine(styleLine("next",   style.next,     forceBold = false, minOpacity = 0.70))
             if (shouldRenderHeader(metaHeader)) {
-                val primaryHdr = styleHeaderTitle()
-                val primaryMeta = styleHeaderMeta()
-                fun styleHeaderSeparator() = buildString {
-                    val sep = rgbaToAss(0.50, "#FFFFFF")
-                    append("Style: hdrSep,${style.fontFamily},1,")
-                    append("$sep,&H000000FF,&H00000000,&H00000000,")
-                    append("0,0,0,0,0,0,0,0,1,2,0,$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
-                }
-
-                appendLine(primaryHdr)
-                appendLine(primaryMeta)
-                appendLine(styleHeaderSeparator())
+                appendLine(styleHeaderTitle())
+                appendLine(styleHeaderMeta())
+                if (sepEnabled) appendLine(styleHeaderSeparator())
             }
 
             appendLine()
@@ -233,9 +241,12 @@ object AssBuilder {
                 add(3, 0, totalMs, "hdr", "{\\q2\\an7}", title)
                 if (chips.isNotEmpty()) add(3, 0, totalMs, "hdrMeta", "{\\q2\\an7}", chips)
 
-                val sepWidth = safeAvailPx
-                val path = "m 0 0 l $sepWidth 0 l $sepWidth 2 l 0 2"
-                add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1}", path)
+                if (sepEnabled) {
+                    val sepWidth = safeAvailPx
+                    val h = sepHeight.coerceAtLeast(1)
+                    val path = "m 0 0 l $sepWidth 0 l $sepWidth $h l 0 $h"
+                    add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1}", path)
+                }
             }
 
             val x = if (isLeft) marginL else width / 2
@@ -256,11 +267,11 @@ object AssBuilder {
                 val curText  = expandedLines[j]
 
                 val toMidStart = t(j)
-                val toMidEnd   = min(totalMs, t(j) + 240)
+                val toMidEnd   = min(totalMs, t(j) + shiftMs)
                 val holdMidEnd = t(j + 1)
-                val toTopEnd   = min(totalMs, t(j + 1) + 240)
+                val toTopEnd   = min(totalMs, t(j + 1) + shiftMs)
                 val holdTopEnd = t(j + 2)
-                val exitEnd    = min(totalMs, t(j + 2) + 240)
+                val exitEnd    = min(totalMs, t(j + 2) + shiftMs)
 
                 val yBottom = yFor(0)
                 val yMid    = yFor(1)
@@ -278,7 +289,7 @@ object AssBuilder {
                 if (j + 1 < N) {
                     val nextText = expandedLines[j + 1]
                     val nextInStart = t(j)
-                    val nextInEnd   = min(totalMs, t(j) + 240)
+                    val nextInEnd   = min(totalMs, t(j) + shiftMs)
                     add(1, nextInStart, nextInEnd, "next", moveTag(yBelow, yBottom, (nextInEnd - nextInStart)), nextText)
                     add(1, nextInEnd,   t(j + 1), "next", posTag(yBottom), nextText)
                 }
@@ -305,7 +316,6 @@ object AssBuilder {
             return
         }
 
-        val outline = 2
         val shadow = if (style.shadow) 2 else 0
 
         fun styleLine(name: String, ls: OverlayLineStyle, forceBold: Boolean) = buildString {
@@ -321,12 +331,18 @@ object AssBuilder {
         val headerAlignCode = 8
         val headerMarginL = max(24, style.paddingLeft)
         val headerMarginR = max(24, style.paddingRight)
-        val headerMarginV = max(40, style.paddingTop)
+
+        val padExtra = (metaHeader?.paddingTopExtraPx ?: 0).coerceAtLeast(0)
+        val headerMarginV = max(40, style.paddingTop) + padExtra
+
         val headerFontTitle = (style.fontSizePx * 0.8).roundToInt().coerceAtLeast(24)
         val headerFontMeta  = (style.fontSizePx * 0.55).roundToInt().coerceAtLeast(18)
 
+        val titleColor = (metaHeader?.headerTitleColorHex ?: "#FFFFFF")
+        val metaColor  = (metaHeader?.headerMetaColorHex  ?: "#FFFFFF")
+
         fun styleHeaderTitle() = buildString {
-            val primary = rgbaToAss(1.0, "#FFFFFF")
+            val primary = rgbaToAss(1.0, titleColor)
             append("Style: hdr,${style.fontFamily},$headerFontTitle,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("-1,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
@@ -334,7 +350,7 @@ object AssBuilder {
         }
 
         fun styleHeaderMeta() = buildString {
-            val primary = rgbaToAss(0.95, "#FFFFFF")
+            val primary = rgbaToAss(0.95, metaColor)
             append("Style: hdrMeta,${style.fontFamily},$headerFontMeta,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
@@ -465,8 +481,11 @@ object AssBuilder {
         }
 
         val padL = panelInnerPaddingPx.coerceAtLeast(24)
-        val padT = panelInnerPaddingPx.coerceAtLeast(24)
+        val padTBase = panelInnerPaddingPx.coerceAtLeast(24)
         val padR = panelInnerPaddingPx.coerceAtLeast(24)
+
+        val padExtra = (metaHeader?.paddingTopExtraPx ?: 0).coerceAtLeast(0)
+        val padT = padTBase + padExtra
 
         val availTextW = (panelWidthPx - padL - padR).coerceAtLeast(120)
         val lineStep = max(20, (style.fontSizePx * 1.35).roundToInt()) // чуть плотнее, чем в BLUR
@@ -513,7 +532,7 @@ object AssBuilder {
 
         data class Seg(val text: String, val start: Long, val end: Long)
 
-// считаем «жёсткие» строки на каждое предложение и индекс первого сегмента предложения
+        // считаем «жёсткие» строки на каждое предложение и индекс первого сегмента предложения
         val segs = ArrayList<Seg>(lines.size * 2)
         val partsPerSentence = IntArray(lines.size) { 0 }
         val sentenceStartSegIdx = IntArray(lines.size) { 0 }
@@ -553,7 +572,7 @@ object AssBuilder {
         var sent = 0
         while (sent < lines.size) {
             val partsThis = partsPerSentence[sent].coerceAtLeast(1)
-            var fromSeg = sentenceStartSegIdx[sent]
+            val fromSeg = sentenceStartSegIdx[sent]
             var toSeg = fromSeg + partsThis - 1
 
             if (partsThis > visibleLines) {
@@ -592,8 +611,11 @@ object AssBuilder {
                 append("$alignCode,$padL,0,$marginV,0")
             }
 
+        val titleColor = (metaHeader?.headerTitleColorHex ?: "#FFFFFF")
+        val metaColor  = (metaHeader?.headerMetaColorHex  ?: "#FFFFFF")
+
         fun styleHeaderTitlePanel() = buildString {
-            val primary = rgbaToAss(1.0, "#FFFFFF")
+            val primary = rgbaToAss(1.0, titleColor)
             append("Style: hdrP,${style.fontFamily},$hdrTitleSize,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("-1,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
@@ -601,7 +623,7 @@ object AssBuilder {
         }
 
         fun styleHeaderMetaPanel() = buildString {
-            val primary = rgbaToAss(0.95, "#FFFFFF")
+            val primary = rgbaToAss(0.95, metaColor)
             append("Style: hdrPMeta,${style.fontFamily},$hdrMetaSize,")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,100,100,0,0,1,2,${if (style.shadow) 2 else 0},")
@@ -696,8 +718,8 @@ object AssBuilder {
     private fun buildChips(meta: MetaHeaderSpec?): String {
         if (meta == null) return ""
         val parts = mutableListOf<String>()
-        if (!meta.level.isNullOrBlank()) parts += meta.level!!.trim()
-        if (!meta.languageName.isNullOrBlank()) parts += meta.languageName!!.trim()
+        if (!meta.level.isNullOrBlank()) parts += meta.level.trim()
+        if (!meta.languageName.isNullOrBlank()) parts += meta.languageName.trim()
         return parts.joinToString("  •  ")
     }
 }
