@@ -161,7 +161,9 @@ data class PanelBackground(
     val opacity: Double = 0.96,
     val gradient: GradientSpec? = null,
     val texture: PanelTextureSpec? = null,
-    val dividerRight: Boolean = true
+    val dividerRight: Boolean = true,
+    val dividerColorHex: String? = null,
+    val dividerOpacity: Double? = null
 )
 
 @Serializable

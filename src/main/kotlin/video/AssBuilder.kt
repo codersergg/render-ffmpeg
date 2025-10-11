@@ -55,7 +55,9 @@ object AssBuilder {
             if (words.isEmpty()) return ""
             val sb = StringBuilder()
             var curLen = 0
-            fun nl() { sb.append("\\N"); curLen = 0 }
+            fun nl() {
+                sb.append("\\N"); curLen = 0
+            }
             for (w in words) {
                 if (w.length > maxChars) {
                     var i = 0
@@ -122,9 +124,10 @@ object AssBuilder {
 
         fun styleHeaderSeparator() = buildString {
             val sep = rgbaToAss(sepOpacity, sepColor)
-            append("Style: hdrSep,${style.fontFamily},1,")
+            append("Style: hdrSep,${style.fontFamily},100,")
             append("$sep,&H000000FF,&H00000000,&H00000000,")
-            append("0,0,0,0,0,0,0,0,1,2,0,$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
+            append("0,0,0,0,100,100,0,0,1,0,0,")
+            append("$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
         }
 
         val totalMs = max(1L, cues.totalMs)
@@ -137,7 +140,8 @@ object AssBuilder {
             if (parts.size <= 1) return Two(parts.firstOrNull().orEmpty(), null)
 
             val aWords = parts[0].trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
-            val bWords = parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
+            val bWords =
+                parts.drop(1).joinToString(" ").trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
 
             val minTailWords = 2
             fun chars(lst: List<String>) = lst.sumOf { it.length } + (lst.size - 1).coerceAtLeast(0)
@@ -217,7 +221,7 @@ object AssBuilder {
             appendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
 
             fun msToAss(t: Long): String {
-                val cs = t.coerceIn(0L, cues.totalMs) / 10
+                val cs = t.coerceIn(0L, totalMs) / 10
                 val h = cs / 360000
                 val m = (cs / 6000) % 60
                 val s = (cs / 100) % 60
@@ -225,7 +229,6 @@ object AssBuilder {
                 return "%01d:%02d:%02d.%02d".format(h, m, s, c)
             }
 
-            val totalMs = max(1L, cues.totalMs)
             fun add(layer: Int, t0: Long, t1: Long, styleName: String, tag: String, text: String) {
                 if (t1 <= t0) return
                 if (text.isEmpty()) return
@@ -239,10 +242,9 @@ object AssBuilder {
                 if (chips.isNotEmpty()) add(3, 0, totalMs, "hdrMeta", "{\\q2\\an7}", chips)
 
                 if (sepEnabled) {
-                    val sepWidth = safeAvailPx
                     val h = sepHeight.coerceAtLeast(1)
-                    val path = "m 0 0 l $sepWidth 0 l $sepWidth $h l 0 $h"
-                    add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1}", path)
+                    val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $h l 0 $h"
+                    add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1\\fs100\\bord0\\shad0}", path)
                 }
             }
 
@@ -287,7 +289,14 @@ object AssBuilder {
                     val nextText = expandedLines[j + 1]
                     val nextInStart = t(j)
                     val nextInEnd = min(totalMs, t(j) + shiftMs)
-                    add(1, nextInStart, nextInEnd, "next", moveTag(yBelow, yBottom, (nextInEnd - nextInStart)), nextText)
+                    add(
+                        1,
+                        nextInStart,
+                        nextInEnd,
+                        "next",
+                        moveTag(yBelow, yBottom, (nextInEnd - nextInStart)),
+                        nextText
+                    )
                     add(1, nextInEnd, t(j + 1), "next", posTag(yBottom), nextText)
                 }
             }
@@ -318,7 +327,14 @@ object AssBuilder {
             append("Style: $name,${style.fontFamily},${style.fontSizePx},")
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("${if (forceBold) -1 else 0},0,0,0,100,100,0,0,1,2,$shadow,")
-            append("2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${max(64, (height * 0.12).roundToInt())},0")
+            append(
+                "2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${
+                    max(
+                        64,
+                        (height * 0.12).roundToInt()
+                    )
+                },0"
+            )
         }
 
         val totalMs = max(1L, cues.totalMs)
@@ -363,7 +379,9 @@ object AssBuilder {
             if (words.isEmpty()) return ""
             val sb = StringBuilder()
             var curLen = 0
-            fun nl() { sb.append("\\N"); curLen = 0 }
+            fun nl() {
+                sb.append("\\N"); curLen = 0
+            }
             for (w in words) {
                 if (w.length > maxChars) {
                     var i = 0
@@ -504,7 +522,9 @@ object AssBuilder {
             var cur = StringBuilder()
             var curLen = 0
             fun flush() {
-                if (curLen > 0) { out += cur.toString(); cur = StringBuilder(); curLen = 0 }
+                if (curLen > 0) {
+                    out += cur.toString(); cur = StringBuilder(); curLen = 0
+                }
             }
             for (w in words) {
                 if (w.length > maxChars) {
@@ -599,9 +619,16 @@ object AssBuilder {
             var toSeg = fromSeg + partsThis - 1
 
             if (partsThis > visibleLines) {
-                val tStart = segs[fromSeg].start
-                val tEnd = (fromSeg..toSeg).maxOf { segs[it].end }
-                pages += Page(fromSeg, toSeg, tStart, tEnd)
+                var cur = 0
+                while (cur < partsThis) {
+                    val chunk = min(visibleLines, partsThis - cur)
+                    val chFrom = fromSeg + cur
+                    val chTo   = chFrom + chunk - 1
+                    val tStart = segs[chFrom].start
+                    val tEnd   = (chFrom..chTo).maxOf { segs[it].end }
+                    pages += Page(chFrom, chTo, tStart, tEnd)
+                    cur += chunk
+                }
                 sent++
                 continue
             }
@@ -655,7 +682,7 @@ object AssBuilder {
 
         fun styleHeaderSeparatorPanel() = buildString {
             val sep = rgbaToAss(sepOpacity, sepColor)
-            append("Style: hdrPSep,${style.fontFamily},1,")
+            append("Style: hdrPSep,${style.fontFamily},100,")
             append("$sep,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,0,0,0,0,1,2,0,7,$padL,0,${padT + hdrTitleSize + hdrMetaSize + 14},0")
         }
@@ -699,7 +726,13 @@ object AssBuilder {
 
             fun add(styleName: String, t0: Long, t1: Long, x: Int, y: Int, text: String, layer: Int) {
                 if (t1 <= t0 || text.isBlank()) return
-                appendLine("Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${esc(text)}")
+                appendLine(
+                    "Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${
+                        esc(
+                            text
+                        )
+                    }"
+                )
             }
 
             if (shouldRenderHeader(metaHeader)) {
@@ -712,7 +745,10 @@ object AssBuilder {
                 if (sepEnabled) {
                     val sepY = padT + titleLines * titleLineH + 10 + hdrMetaSize + 14
                     val path = "m 0 0 l $availTextW 0 l $availTextW $sepHeight l 0 $sepHeight"
-                    appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrPSep,,0,0,0,,{\\q2\\an7\\p1\\pos($padL,$sepY)}$path")
+                    appendLine(
+                        "Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrPSep,,0,0,0,," +
+                                "{\\q2\\an7\\p1\\fs100\\bord0\\shad0\\pos($padL,$sepY)}$path"
+                    )
                 }
             }
 
@@ -733,9 +769,10 @@ object AssBuilder {
     }
 
     private fun rgbaToAss(opacity: Double, hex: String): String {
-        val a = (255.0 - (opacity.coerceIn(0.0, 1.0) * 255.0)).toInt().coerceIn(0, 255)
         val c = hex.removePrefix("#")
-        val r = c.substring(0, 2).toInt(16)
+        require(c.length >= 6) { "Bad color hex: $hex" }
+        val a = (255.0 - (opacity.coerceIn(0.0, 1.0) * 255.0)).toInt().coerceIn(0, 255)
+        val r = c.take(2).toInt(16)
         val g = c.substring(2, 4).toInt(16)
         val b = c.substring(4, 6).toInt(16)
         return "&H%02X%02X%02X%02X".format(a, b, g, r)

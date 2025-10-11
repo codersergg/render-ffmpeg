@@ -87,7 +87,7 @@ fun Application.configureVideoJobsRouting() {
                     val ass = File(tmpDir, "overlay.ass")
 
                     val panelSpec = req.render.panel ?: PanelSpec()
-                    val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceAtLeast(200)
+                    val panelWidthPx = ((w * panelSpec.widthPct).roundToInt()).coerceIn(160, w - 80)
                     val visibleLinesPanel: Int? =
                         if (resolvedLayout == TextLayout.PANEL_LEFT) req.render.visibleLines else null
 
@@ -164,7 +164,10 @@ fun Application.configureVideoJobsRouting() {
                     log.info("VideoRender: output={}x{}, fps={}, bgColor=#{}", w, h, fps, finalBgHex.removePrefix("#"))
 
                     fun escForFilterPath(p: String): String =
-                        p.replace("\\", "\\\\").replace(":", "\\:").replace(",", "\\,")
+                        p.replace("\\", "\\\\")
+                            .replace(":", "\\:")
+                            .replace(",", "\\,")
+                            .replace("'", "\\'")
 
                     val assPathEsc = escForFilterPath(ass.absolutePath)
 
@@ -185,6 +188,9 @@ fun Application.configureVideoJobsRouting() {
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
                     val dividerRight: Boolean = req.render.panel?.background?.dividerRight ?: true
+                    val divHex = req.render.panel?.background?.dividerColorHex ?: "#000000"
+                    val divOp  = (req.render.panel?.background?.dividerOpacity ?: 0.30).coerceIn(0.0, 1.0)
+                    val divColor = "0x${divHex.removePrefix("#")}@$divOp"
 
                     val branding = req.render.branding
                     val wantBugLogo = branding.show &&
@@ -255,7 +261,7 @@ fun Application.configureVideoJobsRouting() {
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
-                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=$divColor:t=fill,")
                                     }
                                     append("format=yuv420p[fbase];")
                                     append("[fbase]subtitles='${assPathEsc}'[withsubs];")
@@ -334,7 +340,7 @@ fun Application.configureVideoJobsRouting() {
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
-                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=$divColor:t=fill,")
                                     }
                                     append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'[withsubs];")
 
@@ -375,7 +381,7 @@ fun Application.configureVideoJobsRouting() {
                                         append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                         append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                         if (dividerRight) {
-                                            append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                            append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=$divColor:t=fill,")
                                         }
                                     } else {
                                         append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
@@ -424,7 +430,7 @@ fun Application.configureVideoJobsRouting() {
                                 append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                 append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                 if (dividerRight) {
-                                    append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                    append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=$divColor:t=fill,")
                                 }
                                 append("format=yuv420p,fps=$fps,subtitles='${assPathEsc}'[withsubs];")
 
@@ -466,7 +472,7 @@ fun Application.configureVideoJobsRouting() {
                                     append("pad=$w:$h:$panelWidthPx:0:color=$bgPadFF,")
                                     append("drawbox=x=0:y=0:w=$panelWidthPx:h=$h:color=$colorPanel:t=fill,")
                                     if (dividerRight) {
-                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=0x000000@0.30:t=fill,")
+                                        append("drawbox=x=${panelWidthPx - 1}:y=0:w=1:h=$h:color=$divColor:t=fill,")
                                     }
                                 } else {
                                     append("pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=$bgPadFF,")
