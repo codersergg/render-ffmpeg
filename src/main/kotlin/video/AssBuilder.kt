@@ -89,6 +89,7 @@ object AssBuilder {
             append("$alignCode,$marginL,$marginR,$marginV,0")
         }
 
+        // ── Заголовок/чипы в шапке ──────────────────────────────────────────
         val headerAlignCode = 7
         val headerMarginL = max(24, style.paddingLeft)
         val headerMarginR = style.paddingRight
@@ -101,10 +102,6 @@ object AssBuilder {
 
         val titleColor = (metaHeader?.headerTitleColorHex ?: "#FFFFFF")
         val metaColor = (metaHeader?.headerMetaColorHex ?: "#FFFFFF")
-        val sepColor = (metaHeader?.separatorColorHex ?: "#FFFFFF")
-        val sepOpacity = (metaHeader?.separatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val sepHeight = (metaHeader?.separatorHeightPx ?: 2).coerceAtLeast(0)
-        val sepEnabled = (metaHeader?.separatorEnabled ?: true) && sepHeight > 0
 
         fun styleHeaderTitle() = buildString {
             val primary = rgbaToAss(1.0, titleColor)
@@ -122,8 +119,14 @@ object AssBuilder {
             append("$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + 10},0")
         }
 
+        // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
+        val hdrSepColor   = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
+        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
+        val hdrSepHeight  = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
+        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
+
         fun styleHeaderSeparator() = buildString {
-            val sep = rgbaToAss(sepOpacity, sepColor)
+            val sep = rgbaToAss(hdrSepOpacity, hdrSepColor)
             append("Style: hdrSep,${style.fontFamily},100,")
             append("$sep,&H000000FF,&H00000000,&H00000000,")
             append("0,0,0,0,100,100,0,0,1,0,0,")
@@ -212,7 +215,7 @@ object AssBuilder {
             if (shouldRenderHeader(metaHeader)) {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
-                if (sepEnabled) appendLine(styleHeaderSeparator())
+                if (hdrSepEnabled) appendLine(styleHeaderSeparator())
             }
 
             appendLine()
@@ -241,8 +244,8 @@ object AssBuilder {
                 add(3, 0, totalMs, "hdr", "{\\q2\\an7}", title)
                 if (chips.isNotEmpty()) add(3, 0, totalMs, "hdrMeta", "{\\q2\\an7}", chips)
 
-                if (sepEnabled) {
-                    val h = sepHeight.coerceAtLeast(1)
+                if (hdrSepEnabled) {
+                    val h = hdrSepHeight.coerceAtLeast(1)
                     val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $h l 0 $h"
                     add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1\\fs100\\bord0\\shad0}", path)
                 }
@@ -368,6 +371,20 @@ object AssBuilder {
             append("$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + 10},0")
         }
 
+        // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
+        val hdrSepColor   = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
+        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
+        val hdrSepHeight  = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
+        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
+
+        fun styleHeaderSeparator() = buildString {
+            val sep = rgbaToAss(hdrSepOpacity, hdrSepColor)
+            append("Style: hdrSep,${style.fontFamily},100,")
+            append("$sep,&H000000FF,&H00000000,&H00000000,")
+            append("0,0,0,0,100,100,0,0,1,0,0,")
+            append("$headerAlignCode,$headerMarginL,$headerMarginR,${headerMarginV + headerFontTitle + headerFontMeta + 14},0")
+        }
+
         fun hardWrap(text: String): String {
             val marginL = max(24, (width * 0.05).roundToInt())
             val marginR = max(24, (width * 0.05).roundToInt())
@@ -425,6 +442,7 @@ object AssBuilder {
             if (shouldRenderHeader(metaHeader)) {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
+                if (hdrSepEnabled) appendLine(styleHeaderSeparator())
             }
             appendLine()
 
@@ -446,6 +464,11 @@ object AssBuilder {
                 appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdr,,0,0,0,,{\\q2\\an8}${esc(title)}")
                 if (chips.isNotEmpty()) {
                     appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrMeta,,0,0,0,,{\\q2\\an8}${esc(chips)}")
+                }
+                if (hdrSepEnabled) {
+                    val safeAvailPx = (width - headerMarginL - headerMarginR).coerceAtLeast(160)
+                    val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $hdrSepHeight l 0 $hdrSepHeight"
+                    appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrSep,,0,0,0,,{\\q2\\an8\\p1\\fs100\\bord0\\shad0}$path")
                 }
             }
 
@@ -506,6 +529,7 @@ object AssBuilder {
         else 0
         val baseY = padT + headerReservedH
 
+        // ── ПАНЕЛЬНЫЙ разделитель
         val sepColor = (metaHeader?.separatorColorHex ?: "#FFFFFF")
         val sepOpacity = (metaHeader?.separatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
         val sepHeight = (metaHeader?.separatorHeightPx ?: 2).coerceAtLeast(0)
@@ -727,11 +751,7 @@ object AssBuilder {
             fun add(styleName: String, t0: Long, t1: Long, x: Int, y: Int, text: String, layer: Int) {
                 if (t1 <= t0 || text.isBlank()) return
                 appendLine(
-                    "Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${
-                        esc(
-                            text
-                        )
-                    }"
+                    "Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${esc(text)}"
                 )
             }
 

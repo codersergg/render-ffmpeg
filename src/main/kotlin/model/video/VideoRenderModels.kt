@@ -181,6 +181,10 @@ data class MetaHeaderSpec(
     val storyTitle: String? = null,
     val level: String? = null,
     val languageName: String? = null,
+    val headerSeparatorEnabled: Boolean? = null,
+    val headerSeparatorHeightPx: Int? = null,
+    val headerSeparatorOpacity: Double? = null, // 0..1
+    val headerSeparatorColorHex: String? = null,
     val paddingTopExtraPx: Int? = null,
     val separatorEnabled: Boolean? = null,
     val separatorHeightPx: Int? = null,
