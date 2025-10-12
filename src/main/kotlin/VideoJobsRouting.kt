@@ -181,9 +181,11 @@ fun Application.configureVideoJobsRouting() {
                     val needPanel = (resolvedLayout == TextLayout.PANEL_LEFT)
 
                     val spans = req.render.backgroundSpans
+                        .asSequence()
+                        .map { it.copy(anchorIdx = it.anchorIdx.coerceIn(0, cues.items.lastIndex)) }
                         .distinctBy { it.anchorIdx }
                         .sortedBy { it.anchorIdx }
-                        .filter { it.anchorIdx in 0..cues.items.lastIndex }
+                        .toList()
 
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
