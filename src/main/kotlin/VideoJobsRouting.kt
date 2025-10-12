@@ -188,8 +188,8 @@ fun Application.configureVideoJobsRouting() {
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
                     val dividerRight: Boolean = req.render.panel?.background?.dividerRight ?: true
-                    val divHex = req.render.panel?.background?.dividerColorHex ?: "#000000"
-                    val divOp  = (req.render.panel?.background?.dividerOpacity ?: 0.30).coerceIn(0.0, 1.0)
+                    val divHex = req.render.panel?.background?.dividerColorHex ?: "#E6E6E6"
+                    val divOp  = (req.render.panel?.background?.dividerOpacity ?: 1.0).coerceIn(0.0, 1.0)
                     val divColor = "0x${divHex.removePrefix("#")}@$divOp"
 
                     val branding = req.render.branding
