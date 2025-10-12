@@ -120,9 +120,9 @@ object AssBuilder {
         }
 
         // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
-        val hdrSepColor   = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
+        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
         val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val hdrSepHeight  = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
+        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
         val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
 
         fun styleHeaderSeparator() = buildString {
@@ -216,6 +216,9 @@ object AssBuilder {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
             }
+            if (hdrSepEnabled) {
+                appendLine(styleHeaderSeparator())
+            }
 
             appendLine()
 
@@ -238,7 +241,9 @@ object AssBuilder {
             }
 
             if (hdrSepEnabled) {
-                appendLine(styleHeaderSeparator())
+                val h = hdrSepHeight.coerceAtLeast(1)
+                val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $h l 0 $h"
+                add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1\\fs100\\bord0\\shad0}", path)
             }
 
             if (shouldRenderHeader(metaHeader)) {
@@ -246,12 +251,6 @@ object AssBuilder {
                 val chips = buildChips(metaHeader)
                 add(3, 0, totalMs, "hdr", "{\\q2\\an7}", title)
                 if (chips.isNotEmpty()) add(3, 0, totalMs, "hdrMeta", "{\\q2\\an7}", chips)
-
-                if (hdrSepEnabled) {
-                    val h = hdrSepHeight.coerceAtLeast(1)
-                    val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $h l 0 $h"
-                    add(3, 0, totalMs, "hdrSep", "{\\q2\\an7\\p1\\fs100\\bord0\\shad0}", path)
-                }
             }
 
             val x = if (isLeft) marginL else width / 2
@@ -334,12 +333,8 @@ object AssBuilder {
             append("$primary,&H000000FF,&H00000000,&H00000000,")
             append("${if (forceBold) -1 else 0},0,0,0,100,100,0,0,1,2,$shadow,")
             append(
-                "2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${
-                    max(
-                        64,
-                        (height * 0.12).roundToInt()
-                    )
-                },0"
+                "2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())}," +
+                        "${max(64, (height * 0.12).roundToInt())},0"
             )
         }
 
@@ -375,9 +370,9 @@ object AssBuilder {
         }
 
         // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
-        val hdrSepColor   = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
+        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
         val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val hdrSepHeight  = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
+        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
         val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
 
         fun styleHeaderSeparator() = buildString {
@@ -446,6 +441,9 @@ object AssBuilder {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
             }
+            if (hdrSepEnabled) {
+                appendLine(styleHeaderSeparator())
+            }
             appendLine()
 
             appendLine("[Events]")
@@ -461,7 +459,9 @@ object AssBuilder {
             }
 
             if (hdrSepEnabled) {
-                appendLine(styleHeaderSeparator())
+                val safeAvailPx = (width - headerMarginL - headerMarginR).coerceAtLeast(160)
+                val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $hdrSepHeight l 0 $hdrSepHeight"
+                appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrSep,,0,0,0,,{\\q2\\an8\\p1\\fs100\\bord0\\shad0}$path")
             }
 
             if (shouldRenderHeader(metaHeader)) {
@@ -470,11 +470,6 @@ object AssBuilder {
                 appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdr,,0,0,0,,{\\q2\\an8}${esc(title)}")
                 if (chips.isNotEmpty()) {
                     appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrMeta,,0,0,0,,{\\q2\\an8}${esc(chips)}")
-                }
-                if (hdrSepEnabled) {
-                    val safeAvailPx = (width - headerMarginL - headerMarginR).coerceAtLeast(160)
-                    val path = "m 0 0 l $safeAvailPx 0 l $safeAvailPx $hdrSepHeight l 0 $hdrSepHeight"
-                    appendLine("Dialogue: 3,${msToAss(0)},${msToAss(totalMs)},hdrSep,,0,0,0,,{\\q2\\an8\\p1\\fs100\\bord0\\shad0}$path")
                 }
             }
 
@@ -653,9 +648,9 @@ object AssBuilder {
                 while (cur < partsThis) {
                     val chunk = min(visibleLines, partsThis - cur)
                     val chFrom = fromSeg + cur
-                    val chTo   = chFrom + chunk - 1
+                    val chTo = chFrom + chunk - 1
                     val tStart = segs[chFrom].start
-                    val tEnd   = (chFrom..chTo).maxOf { segs[it].end }
+                    val tEnd = (chFrom..chTo).maxOf { segs[it].end }
                     pages += Page(chFrom, chTo, tStart, tEnd)
                     cur += chunk
                 }
