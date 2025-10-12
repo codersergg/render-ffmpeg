@@ -120,10 +120,10 @@ object AssBuilder {
         }
 
         // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
-        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
-        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
-        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
+        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#B2B6BD")
+        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 1.00).coerceIn(0.0, 1.0)
+        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 12).coerceAtLeast(0)
+        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled ?: true) && hdrSepHeight > 0
 
         fun styleHeaderSeparator() = buildString {
             val sep = rgbaToAss(hdrSepOpacity, hdrSepColor)
@@ -370,10 +370,10 @@ object AssBuilder {
         }
 
         // ── Разделитель ШАПКИ (headerSeparator*) ─────────────────────
-        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#FFFFFF")
-        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 0).coerceAtLeast(0)
-        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled == true) && hdrSepHeight > 0
+        val hdrSepColor = (metaHeader?.headerSeparatorColorHex ?: "#B2B6BD")
+        val hdrSepOpacity = (metaHeader?.headerSeparatorOpacity ?: 1.00).coerceIn(0.0, 1.0)
+        val hdrSepHeight = (metaHeader?.headerSeparatorHeightPx ?: 12).coerceAtLeast(0)
+        val hdrSepEnabled = (metaHeader?.headerSeparatorEnabled ?: true) && hdrSepHeight > 0
 
         fun styleHeaderSeparator() = buildString {
             val sep = rgbaToAss(hdrSepOpacity, hdrSepColor)
@@ -530,10 +530,10 @@ object AssBuilder {
         else 0
         val baseY = padT + headerReservedH
 
-        // ── ПАНЕЛЬНЫЙ разделитель
-        val sepColor = (metaHeader?.separatorColorHex ?: "#FFFFFF")
+        // ── ПАНЕЛЬНЫЙ разделитель (separator*)
+        val sepColor = (metaHeader?.separatorColorHex ?: "#B2B6BD")
         val sepOpacity = (metaHeader?.separatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val sepHeight = (metaHeader?.separatorHeightPx ?: 2).coerceAtLeast(0)
+        val sepHeight = (metaHeader?.separatorHeightPx ?: 12).coerceAtLeast(0)
         val sepEnabled = (metaHeader?.separatorEnabled ?: true) && sepHeight > 0
 
         val avgCharPxBold = max(7.0, style.fontSizePx * 0.50)

@@ -139,7 +139,7 @@ data class GradientSpec(
     val type: GradientType = GradientType.LINEAR,
     val directionDeg: Double = 0.0,
     val paletteStrategy: PaletteStrategy = PaletteStrategy.ANALOGOUS,
-    val stops: List<GradientStop> = emptyList(), // для PRESET/MANUAL
+    val stops: List<GradientStop> = emptyList(),
     val auto: GradientAutoSpec = GradientAutoSpec(),
     val smoothness: Double = 0.6,
     val inkOverlayEnabled: Boolean = true,
@@ -157,13 +157,10 @@ data class PanelTextureSpec(
 @Serializable
 data class PanelBackground(
     val mode: PanelBackgroundMode = PanelBackgroundMode.SOLID,
-    val colorHex: String = "#141416",
-    val opacity: Double = 0.96,
+    val colorHex: String = "#0E0F13",
+    val opacity: Double = 1.0,
     val gradient: GradientSpec? = null,
-    val texture: PanelTextureSpec? = null,
-    val dividerRight: Boolean = true,
-    val dividerColorHex: String? = null,
-    val dividerOpacity: Double? = null
+    val texture: PanelTextureSpec? = null
 )
 
 @Serializable
@@ -181,15 +178,19 @@ data class MetaHeaderSpec(
     val storyTitle: String? = null,
     val level: String? = null,
     val languageName: String? = null,
+
     val headerSeparatorEnabled: Boolean? = null,
     val headerSeparatorHeightPx: Int? = null,
     val headerSeparatorOpacity: Double? = null, // 0..1
     val headerSeparatorColorHex: String? = null,
+
     val paddingTopExtraPx: Int? = null,
+
     val separatorEnabled: Boolean? = null,
     val separatorHeightPx: Int? = null,
     val separatorOpacity: Double? = null,
     val separatorColorHex: String? = null,
+
     val headerTitleColorHex: String? = null,
     val headerMetaColorHex: String? = null,
     val allowTwoLineTitleInPanel: Boolean? = null
