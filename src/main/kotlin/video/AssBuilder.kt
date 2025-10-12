@@ -215,7 +215,6 @@ object AssBuilder {
             if (shouldRenderHeader(metaHeader)) {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
-                if (hdrSepEnabled) appendLine(styleHeaderSeparator())
             }
 
             appendLine()
@@ -236,6 +235,10 @@ object AssBuilder {
                 if (t1 <= t0) return
                 if (text.isEmpty()) return
                 appendLine("Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,$tag${esc(text)}")
+            }
+
+            if (hdrSepEnabled) {
+                appendLine(styleHeaderSeparator())
             }
 
             if (shouldRenderHeader(metaHeader)) {
@@ -442,7 +445,6 @@ object AssBuilder {
             if (shouldRenderHeader(metaHeader)) {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
-                if (hdrSepEnabled) appendLine(styleHeaderSeparator())
             }
             appendLine()
 
@@ -456,6 +458,10 @@ object AssBuilder {
                 val s = (cs / 100) % 60
                 val c = cs % 100
                 return "%01d:%02d:%02d.%02d".format(h, m, s, c)
+            }
+
+            if (hdrSepEnabled) {
+                appendLine(styleHeaderSeparator())
             }
 
             if (shouldRenderHeader(metaHeader)) {
