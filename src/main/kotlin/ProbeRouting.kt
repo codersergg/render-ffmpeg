@@ -76,20 +76,110 @@ fun Application.configureProbeRouting() {
 }
 
 private fun probeSamplesAndRate(file: File): Pair<Long, Int> {
-    val p = ProcessBuilder(
+    fun runAndLines(vararg args: String): List<String> {
+        val p = ProcessBuilder(*args).redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readLines().map { it.trim() }.filter { it.isNotEmpty() }
+        val code = p.waitFor()
+        require(code == 0) { "ffprobe exit=$code output=$out" }
+        return out
+    }
+
+    runCatching {
+        val out = runAndLines(
+            "ffprobe", "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=nb_samples,sample_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            file.absolutePath
+        )
+        if (out.size >= 2) {
+            val nb = out[0].trim().toLongOrNull()
+            val sr = out[1].trim().toIntOrNull()
+            if (nb != null && sr != null && sr > 0) return nb to sr
+        }
+        if (out.size == 1) {
+            val sr = out[0].trim().toIntOrNull()
+            if (sr != null && sr > 0) {
+                val alt = runAndLines(
+                    "ffprobe", "-v", "error",
+                    "-select_streams", "a:0",
+                    "-show_entries", "stream=duration_ts,time_base,sample_rate",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    file.absolutePath
+                )
+                if (alt.size >= 3) {
+                    val durTs = alt[0].trim().toLongOrNull()
+                    val timeBase = alt[1].trim()
+                    val sr2 = alt[2].trim().toIntOrNull() ?: sr
+                    val parts = timeBase.split("/")
+                    if (durTs != null && parts.size == 2) {
+                        val num = parts[0].toLongOrNull()
+                        val den = parts[1].toLongOrNull()
+                        if (num != null && den != null && den > 0L) {
+                            val nume = durTs * num * sr2
+                            val samples = (nume + den / 2) / den
+                            return samples to sr2
+                        }
+                    }
+                }
+                val fmt = runAndLines(
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    file.absolutePath
+                )
+                val seconds = fmt.firstOrNull()?.trim()?.toDoubleOrNull()
+                if (seconds != null && seconds > 0.0) {
+                    val samples = kotlin.math.round(seconds * sr)
+                    return samples.toLong() to sr
+                }
+            }
+        }
+        throw IllegalArgumentException("unresolved audio metrics (nb_samples/sample_rate)")
+    }.onFailure {  }
+
+    runCatching {
+        val alt = runAndLines(
+            "ffprobe", "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=duration_ts,time_base,sample_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            file.absolutePath
+        )
+        if (alt.size >= 3) {
+            val durTs = alt[0].trim().toLongOrNull()
+            val timeBase = alt[1].trim()
+            val sr = alt[2].trim().toIntOrNull()
+            if (durTs != null && sr != null && sr > 0) {
+                val parts = timeBase.split("/")
+                if (parts.size == 2) {
+                    val num = parts[0].toLongOrNull()
+                    val den = parts[1].toLongOrNull()
+                    if (num != null && den != null && den > 0L) {
+                        val samples = (durTs * num * sr + den / 2) / den
+                        return samples to sr
+                    }
+                }
+            }
+        }
+        throw IllegalArgumentException("unresolved audio metrics (duration_ts/time_base)")
+    }.onFailure {  }
+
+    val srOnly = runAndLines(
         "ffprobe", "-v", "error",
         "-select_streams", "a:0",
-        "-show_entries", "stream=nb_samples,sample_rate",
+        "-show_entries", "stream=sample_rate",
         "-of", "default=noprint_wrappers=1:nokey=1",
         file.absolutePath
-    ).redirectErrorStream(true).start()
-    val out = p.inputStream.bufferedReader().readLines()
-    val code = p.waitFor()
-    require(code == 0) { "ffprobe failed: $out" }
-    val nb = out.getOrNull(0)?.trim()?.toLongOrNull()
-    val sr = out.getOrNull(1)?.trim()?.toIntOrNull()
-    require(nb != null && sr != null && sr > 0) { "bad ffprobe: $out" }
-    return nb to sr
+    ).firstOrNull()?.trim()?.toIntOrNull() ?: throw IllegalArgumentException("no sample_rate")
+    val dur = runAndLines(
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file.absolutePath
+    ).firstOrNull()?.trim()?.toDoubleOrNull() ?: 0.0
+    val samples = kotlin.math.round(dur * srOnly)
+    return samples.toLong() to srOnly
 }
 
 private fun resampleSamplesExact(nbSamples: Long, srcRate: Int, dstRate: Int = 44100): Long {

@@ -12,15 +12,37 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.*
 import io.ktor.utils.io.jvm.javaio.*
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.*
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.*
 
 fun Application.configureRouting() {
-    val client = HttpClient(CIO)
+    val client = HttpClient(CIO) {
+        engine {
+            requestTimeout = 180_000
+        }
+    }
     val log = LoggerFactory.getLogger(this::class.java)
+
+    launch(Dispatchers.IO) {
+        while (true) {
+            delay(10 * 60 * 1000L)
+            runCatching {
+                val root = File("/downloads")
+                val now = System.currentTimeMillis()
+                root.listFiles()
+                    ?.asSequence()
+                    ?.filter { it.isDirectory }
+                    ?.forEach { dir ->
+                        val age = now - dir.lastModified()
+                        if (age > 60 * 60 * 1000L) { // старше 1 часа
+                            dir.deleteRecursively()
+                        }
+                    }
+            }.onFailure { e -> log.warn("cleanup failed: ${e.message}") }
+        }
+    }
 
     routing {
         get("/") { call.respondText("Hello ffmpeg!") }
@@ -29,36 +51,30 @@ fun Application.configureRouting() {
             try {
                 val request = call.receive<MergeRequest>()
                 log.info("Получен запрос на слияние: ${request.urls}")
-
                 if (request.urls.isEmpty()) {
-                    log.warn("Ошибка: пустой список URL-ов")
-                    call.respond(HttpStatusCode.BadRequest, "No URLs provided")
-                    return@post
+                    call.respond(HttpStatusCode.BadRequest, "No URLs provided"); return@post
                 }
 
                 val tempDir = File("/downloads/${UUID.randomUUID()}").apply { mkdirs() }
-                val downloadedFiles = mutableListOf<File>()
 
-                val downloadJobs = request.urls.mapIndexed { index, url ->
-                    async {
-                        log.info("Скачивание файла №$index: $url")
-                        val file = File(tempDir, "part$index.mp3")
-                        val response = client.get(url)
-                        file.outputStream().use { output ->
-                            response.body<ByteReadChannel>().copyTo(output)
+                val downloadedFiles = coroutineScope {
+                    request.urls.mapIndexed { index, url ->
+                        async(Dispatchers.IO) {
+                            log.info("Скачивание файла №$index: $url")
+                            val file = File(tempDir, "part$index.mp3")
+                            val response = client.get(url)
+                            file.outputStream().use { out ->
+                                response.body<ByteReadChannel>().copyTo(out)
+                            }
+                            file
                         }
-                        log.debug("Файл сохранён: ${file.absolutePath}")
-                        file
-                    }
+                    }.awaitAll()
                 }
-
-                downloadedFiles.addAll(downloadJobs.awaitAll())
-                log.info("Все файлы успешно скачаны")
 
                 val listFile = File(tempDir, "list.txt").apply {
                     printWriter().use { out ->
-                        downloadedFiles.forEach {
-                            out.println("file '${it.absolutePath}'")
+                        downloadedFiles.forEach { f ->
+                            out.println("file '${f.absolutePath}'")
                         }
                     }
                 }
@@ -73,7 +89,6 @@ fun Application.configureRouting() {
                     "-c:a", "libmp3lame", "-ar", "44100", "-b:a", "192k",
                     outputFile.absolutePath
                 )
-
                 log.info("Запуск ffmpeg: ${ffmpegCommand.joinToString(" ")}")
 
                 val process = ProcessBuilder(ffmpegCommand)
@@ -101,9 +116,6 @@ fun Application.configureRouting() {
             } catch (e: Exception) {
                 log.error("Ошибка при обработке merge-запроса", e)
                 call.respond(HttpStatusCode.InternalServerError, "Error: ${e.message}")
-            } finally {
-                val path = File("/downloads")
-                path.listFiles()?.forEach { if (it.isDirectory) it.deleteRecursively() }
             }
         }
     }
