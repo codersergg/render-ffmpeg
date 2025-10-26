@@ -11,7 +11,7 @@ plugins {
 }
 
 group = "com.codersergg"
-val versionNumber = "0.4.8"
+val versionNumber = "0.4.10"
 version = versionNumber
 
 application {
