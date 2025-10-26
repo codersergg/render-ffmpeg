@@ -167,18 +167,21 @@ object AssBuilder {
         }
 
         val startsOrig: List<Long> = cues.items.map { it.startMs }
+        val endsOrig: List<Long> = cues.items.map { it.endMs }
         val linesTwo: List<Two> = lines.map { splitTwo(it) }
 
         val expandedStarts = ArrayList<Long>(lines.size * 2)
+        val expandedEnds = ArrayList<Long>(lines.size * 2)
         val expandedLines = ArrayList<String>(lines.size * 2)
 
         for (j in lines.indices) {
             val t0 = startsOrig[j]
-            val t1 = if (j + 1 < startsOrig.size) startsOrig[j + 1] else totalMs
+            val t1 = endsOrig[j].coerceIn(t0 + 1, totalMs)
             val cur = linesTwo[j]
 
             if (cur.b == null) {
                 expandedStarts += t0
+                expandedEnds += t1
                 expandedLines += cur.a
             } else {
                 val lenA = cur.a.length.toDouble().coerceAtLeast(1.0)
@@ -187,8 +190,14 @@ object AssBuilder {
                 val dur = (t1 - t0).coerceAtLeast(2L * shiftMs)
                 val tMid = (t0 + (dur * ratio)).toLong().coerceIn(t0 + shiftMs, t1 - shiftMs)
 
-                expandedStarts += t0; expandedLines += cur.a
-                expandedStarts += tMid; expandedLines += cur.b
+                // A-part
+                expandedStarts += t0
+                expandedEnds += tMid
+                expandedLines += cur.a
+                // B-part
+                expandedStarts += tMid
+                expandedEnds += t1
+                expandedLines += cur.b
             }
         }
 
@@ -215,9 +224,7 @@ object AssBuilder {
                 appendLine(styleHeaderTitle())
                 appendLine(styleHeaderMeta())
             }
-            if (hdrSepEnabled) {
-                appendLine(styleHeaderSeparator())
-            }
+            if (hdrSepEnabled) appendLine(styleHeaderSeparator())
             appendLine()
 
             appendLine("[Events]")
@@ -260,21 +267,28 @@ object AssBuilder {
                 "{\\q2\\an$alignCode\\move($x,$y0,$x,$y1,0,$durationMs)}"
 
             val N = expandedLines.size
-            fun t(i: Int): Long = when {
+            fun segStart(i: Int) = when {
                 i < 0 -> 0L
                 i < N -> expandedStarts[i]
+                else -> totalMs
+            }
+
+            fun segEnd(i: Int) = when {
+                i < 0 -> 0L
+                i < N -> expandedEnds[i]
                 else -> totalMs
             }
 
             for (j in 0 until N) {
                 val curText = expandedLines[j]
 
-                val toMidStart = t(j)
-                val toMidEnd = min(totalMs, t(j) + shiftMs)
-                val holdMidEnd = t(j + 1)
-                val toTopEnd = min(totalMs, t(j + 1) + shiftMs)
-                val holdTopEnd = t(j + 2)
-                val exitEnd = min(totalMs, t(j + 2) + shiftMs)
+                val toMidStart = segStart(j)
+                val toMidEnd = min(totalMs, toMidStart + shiftMs)
+                val holdMidEnd = segEnd(j)
+                val toTopEnd = min(totalMs, holdMidEnd + shiftMs)
+                val nextStart = if (j + 1 < N) segStart(j + 1) else totalMs
+                val holdTopEnd = nextStart
+                val exitEnd = min(totalMs, nextStart + shiftMs)
 
                 val yBottom = yFor(0)
                 val yMid = yFor(1)
@@ -282,17 +296,20 @@ object AssBuilder {
                 val yBelow = yFor(-1)
                 val yAbove = yFor(3)
 
+                // current line
                 add(2, toMidStart, toMidEnd, "cur", moveTag(yBottom, yMid, (toMidEnd - toMidStart)), curText)
                 add(2, toMidEnd, holdMidEnd, "cur", posTag(yMid), curText)
 
+                // becomes previous
                 add(0, holdMidEnd, toTopEnd, "prev", moveTag(yMid, yTop, (toTopEnd - holdMidEnd)), curText)
                 add(0, toTopEnd, holdTopEnd, "prev", posTag(yTop), curText)
                 add(0, holdTopEnd, exitEnd, "prev", moveTag(yTop, yAbove, (exitEnd - holdTopEnd)), curText)
 
+                // preview next
                 if (j + 1 < N) {
                     val nextText = expandedLines[j + 1]
-                    val nextInStart = t(j)
-                    val nextInEnd = min(totalMs, t(j) + shiftMs)
+                    val nextInStart = segStart(j)
+                    val nextInEnd = min(totalMs, nextInStart + shiftMs)
                     add(
                         1,
                         nextInStart,
@@ -301,7 +318,7 @@ object AssBuilder {
                         moveTag(yBelow, yBottom, (nextInEnd - nextInStart)),
                         nextText
                     )
-                    add(1, nextInEnd, t(j + 1), "next", posTag(yBottom), nextText)
+                    add(1, nextInEnd, segStart(j + 1), "next", posTag(yBottom), nextText)
                 }
             }
         })
@@ -333,10 +350,7 @@ object AssBuilder {
             append("${if (forceBold) -1 else 0},0,0,0,100,100,0,0,1,2,$shadow,")
             append(
                 "2,${max(24, (width * 0.05).roundToInt())},${max(24, (width * 0.05).roundToInt())},${
-                    max(
-                        64,
-                        (height * 0.12).roundToInt()
-                    )
+                    max(64, (height * 0.12).roundToInt())
                 },0"
             )
         }
@@ -486,7 +500,7 @@ object AssBuilder {
 
             for (j in cues.items.indices) {
                 val t0 = cues.items[j].startMs
-                val t1 = if (j + 1 < cues.items.size) cues.items[j + 1].startMs else totalMs
+                val t1 = cues.items[j].endMs.coerceIn(t0 + 1, totalMs)
                 if (t1 <= t0) continue
                 val txt = hardWrap(lines[j])
                 appendLine("Dialogue: 0,${msToAss(t0)},${msToAss(t1)},cur,,0,0,0,,$posTag${esc(txt)}")
@@ -541,7 +555,7 @@ object AssBuilder {
         // ── Параметры ВЕРТИКАЛЬНОГО разделителя ПАНЕЛИ (separator*)
         val panelSepColor = (metaHeader?.separatorColorHex ?: "#B2B6BD")
         val panelSepOpacity = (metaHeader?.separatorOpacity ?: 0.50).coerceIn(0.0, 1.0)
-        val panelSepWidth = (metaHeader?.separatorHeightPx ?: 12).coerceAtLeast(0) // «Толщина, px»
+        val panelSepWidth = (metaHeader?.separatorHeightPx ?: 12).coerceAtLeast(0)
         val panelSepEnabled = (metaHeader?.separatorEnabled ?: true) && panelSepWidth > 0
 
         val gapBelowHeaderSeparator = 14
@@ -776,9 +790,7 @@ object AssBuilder {
                 if (t1 <= t0 || text.isBlank()) return
                 appendLine(
                     "Dialogue: $layer,${msToAss(t0)},${msToAss(t1)},$styleName,,0,0,0,,{\\q2\\an7\\pos($x,$y)}${
-                        esc(
-                            text
-                        )
+                        esc(text)
                     }"
                 )
             }
@@ -821,7 +833,6 @@ object AssBuilder {
             }
         })
     }
-
 
     private fun rgbaToAss(opacity: Double, hex: String): String {
         val c = hex.removePrefix("#")
