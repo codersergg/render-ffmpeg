@@ -33,10 +33,37 @@ fun Application.configureProbeRouting() {
                     target
                 }
 
-                val durations = files.map { f -> probeDurationMs(f) }
-                val total = durations.fold(0L, Long::plus)
+                val dstRate = 44100
+                val pieceSamples = mutableListOf<Long>()
+                var totalSamples = 0L
 
-                call.respond(ProbeDurationsResponse(durationsMs = durations, totalMs = total))
+                for (file in files) {
+                    val (srcSamples, srcRate) = probeSamplesAndRate(file)
+                    val dstSamples = resampleSamplesExact(srcSamples, srcRate, dstRate)
+                    pieceSamples += dstSamples
+                    totalSamples += dstSamples
+                }
+
+                val cumulative = LongArray(pieceSamples.size)
+                run {
+                    var acc = 0L
+                    for (i in pieceSamples.indices) {
+                        acc += pieceSamples[i]
+                        cumulative[i] = acc
+                    }
+                }
+                val cumulativeMs = cumulative.map { msFromSamples(it, dstRate) }
+
+                val durationsMs = buildList {
+                    var prev = 0L
+                    for (cur in cumulativeMs) {
+                        add(cur - prev)
+                        prev = cur
+                    }
+                }
+                val totalMs = msFromSamples(totalSamples, dstRate)
+
+                call.respond(ProbeDurationsResponse(durationsMs = durationsMs, totalMs = totalMs))
             } catch (e: Exception) {
                 log.error("probe-durations failed", e)
                 throw e
@@ -48,18 +75,30 @@ fun Application.configureProbeRouting() {
     }
 }
 
-/** Возвращает длительность файла в миллисекундах через ffprobe */
-private fun probeDurationMs(file: File): Long {
-    val pb = ProcessBuilder(
+private fun probeSamplesAndRate(file: File): Pair<Long, Int> {
+    val p = ProcessBuilder(
         "ffprobe", "-v", "error",
-        "-show_entries", "format=duration",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=nb_samples,sample_rate",
         "-of", "default=noprint_wrappers=1:nokey=1",
         file.absolutePath
-    ).redirectErrorStream(true)
-    val p = pb.start()
-    val out = p.inputStream.bufferedReader().readText().trim()
+    ).redirectErrorStream(true).start()
+    val out = p.inputStream.bufferedReader().readLines()
     val code = p.waitFor()
-    require(code == 0) { "ffprobe exit=$code output=$out" }
-    val seconds = out.toDoubleOrNull() ?: error("Cannot parse ffprobe output: '$out'")
-    return (seconds * 1000.0).toLong()
+    require(code == 0) { "ffprobe failed: $out" }
+    val nb = out.getOrNull(0)?.trim()?.toLongOrNull()
+    val sr = out.getOrNull(1)?.trim()?.toIntOrNull()
+    require(nb != null && sr != null && sr > 0) { "bad ffprobe: $out" }
+    return nb to sr
 }
+
+private fun resampleSamplesExact(nbSamples: Long, srcRate: Int, dstRate: Int = 44100): Long {
+    val num = nbSamples * dstRate.toLong()
+    return (num + srcRate/2) / srcRate
+}
+
+private fun msFromSamples(samples: Long, rate: Int = 44100): Long {
+    val num = samples * 1000L
+    return (num + rate/2) / rate
+}
+

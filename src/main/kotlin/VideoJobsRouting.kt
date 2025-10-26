@@ -51,6 +51,37 @@ fun Application.configureVideoJobsRouting() {
                         bodyAsChannel().copyTo(audioFile.outputStream())
                     }
 
+                    fun probeDurationMs(file: File): Long {
+                        val p = ProcessBuilder(
+                            "ffprobe", "-v", "error",
+                            "-select_streams", "a:0",
+                            "-show_entries", "stream=nb_samples,sample_rate",
+                            "-of", "default=noprint_wrappers=1:nokey=1",
+                            file.absolutePath
+                        ).redirectErrorStream(true).start()
+                        val out = p.inputStream.bufferedReader().readLines()
+                        if (p.waitFor() == 0) {
+                            val nb = out.getOrNull(0)?.trim()?.toLongOrNull()
+                            val sr = out.getOrNull(1)?.trim()?.toIntOrNull()
+                            if (nb != null && sr != null && sr > 0) {
+                                val num = nb * 1000L
+                                return (num + sr / 2) / sr
+                            }
+                        }
+                        val p2 = ProcessBuilder(
+                            "ffprobe", "-v", "error",
+                            "-show_entries", "format=duration",
+                            "-of", "default=noprint_wrappers=1:nokey=1",
+                            file.absolutePath
+                        ).redirectErrorStream(true).start()
+                        val out2 = p2.inputStream.bufferedReader().readText().trim()
+                        p2.waitFor()
+                        val sec = out2.toDoubleOrNull() ?: 0.0
+                        return (sec * 1000.0).toLong()
+                    }
+                    val audioMs = probeDurationMs(audioFile)
+                    val audioMsSafe = (audioMs - 80L).coerceAtLeast(1L)
+
                     val cues: EpisodeCuesPayload = req.render.cues ?: run {
                         val cuesUrl = requireNotNull(req.render.cuesUrl) { "cuesUrl is required when cues is null" }
                         val resp = client.get(cuesUrl) { accept(ContentType.Application.Json) }
@@ -76,6 +107,24 @@ fun Application.configureVideoJobsRouting() {
                         "lines count (${lines.size}) must match cues (${cues.items.size})"
                     }
 
+                    val targetTotalMs = maxOf(cues.totalMs, audioMsSafe)
+                    val normalizedCues: EpisodeCuesPayload = if (cues.items.isNotEmpty()) {
+                        val last = cues.items.last()
+                        if (last.endMs < targetTotalMs) {
+                            cues.copy(
+                                items = cues.items.dropLast(1) + last.copy(endMs = targetTotalMs),
+                                totalMs = targetTotalMs
+                            )
+                        } else {
+                            if (cues.totalMs != targetTotalMs) cues.copy(totalMs = targetTotalMs) else cues
+                        }
+                    } else cues.copy(totalMs = targetTotalMs)
+
+                    log.info(
+                        "VideoRender: durations ms — audio={}, cues={}, target={}",
+                        audioMs, cues.totalMs, targetTotalMs
+                    )
+
                     val w = req.render.resolution.width
                     val h = req.render.resolution.height
                     val isVertical = h > w
@@ -95,7 +144,7 @@ fun Application.configureVideoJobsRouting() {
                         TextLayout.VERTICAL_ONE -> {
                             AssBuilder.buildAssFileVerticalInstant(
                                 target = ass,
-                                cues = cues,
+                                cues = normalizedCues,
                                 lines = lines,
                                 style = req.render.overlayStyle,
                                 width = w,
@@ -107,7 +156,7 @@ fun Application.configureVideoJobsRouting() {
                         TextLayout.PANEL_LEFT -> {
                             AssBuilder.buildAssFilePanelLeftReplace(
                                 target = ass,
-                                cues = cues,
+                                cues = normalizedCues,
                                 lines = lines,
                                 style = req.render.overlayStyle,
                                 width = w,
@@ -124,7 +173,7 @@ fun Application.configureVideoJobsRouting() {
                             if (isVertical) {
                                 AssBuilder.buildAssFileVerticalInstant(
                                     target = ass,
-                                    cues = cues,
+                                    cues = normalizedCues,
                                     lines = lines,
                                     style = req.render.overlayStyle,
                                     width = w,
@@ -134,7 +183,7 @@ fun Application.configureVideoJobsRouting() {
                             } else {
                                 AssBuilder.buildAssFile(
                                     target = ass,
-                                    cues = cues,
+                                    cues = normalizedCues,
                                     lines = lines,
                                     style = req.render.overlayStyle,
                                     width = w,
@@ -145,7 +194,6 @@ fun Application.configureVideoJobsRouting() {
                         }
                     }
 
-                    val requestedHex = req.render.background.colorHex
                     fun isVeryDark(hex: String?): Boolean {
                         if (hex == null) return true
                         val hsh = hex.removePrefix("#")
@@ -156,6 +204,7 @@ fun Application.configureVideoJobsRouting() {
                         return (r + g + b) <= 0x60
                     }
 
+                    val requestedHex = req.render.background.colorHex
                     val defaultBg = "#6A6A6A"
                     val finalBgHex =
                         if (req.render.background.imageUrl == null && isVeryDark(requestedHex)) defaultBg else (requestedHex
@@ -180,16 +229,19 @@ fun Application.configureVideoJobsRouting() {
 
                     val needPanel = (resolvedLayout == TextLayout.PANEL_LEFT)
 
-                    val spans = req.render.backgroundSpans
+                    val spansMutable = req.render.backgroundSpans
                         .asSequence()
-                        .map { it.copy(anchorIdx = it.anchorIdx.coerceIn(0, cues.items.lastIndex)) }
+                        .map { it.copy(anchorIdx = it.anchorIdx.coerceIn(0, normalizedCues.items.lastIndex)) }
                         .distinctBy { it.anchorIdx }
                         .sortedBy { it.anchorIdx }
-                        .toList()
+                        .toMutableList()
+                    if (spansMutable.isNotEmpty() && spansMutable.first().anchorIdx > 0) {
+                        spansMutable.add(0, spansMutable.first().copy(anchorIdx = 0))
+                    }
+                    val spans = spansMutable.toList()
 
                     val panelColorHex = (req.render.panel?.background?.colorHex ?: "#0E0F13").removePrefix("#")
                     val panelOpacity = (req.render.panel?.background?.opacity ?: 1.0).coerceIn(0.0, 1.0)
-
 
                     val branding = req.render.branding
                     val wantBugLogo = branding.show &&
@@ -232,7 +284,7 @@ fun Application.configureVideoJobsRouting() {
                     if (spans.isNotEmpty()) {
                         val prep = BackgroundSpansFfmpeg.prepare(
                             spans = spans,
-                            cues = cues.items,
+                            cues = normalizedCues.items,
                             width = w,
                             height = h,
                             fps = fps,
@@ -309,29 +361,23 @@ fun Application.configureVideoJobsRouting() {
                                 )
                             )
                         } else {
-                            val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
+                            val totalSec = (targetTotalMs.coerceAtLeast(1)).toDouble() / 1000.0
                             val inputs = mutableListOf<String>()
-                            if (req.render.background.imageUrl != null) {
+                            val preferredBgUrl = spans.firstOrNull()?.imageUrl ?: req.render.background.imageUrl
+
+                            if (preferredBgUrl != null) {
                                 val bg = File(tmpDir, "bg.jpg")
-                                client.get(requireNotNull(req.render.background.imageUrl)).apply {
+                                client.get(preferredBgUrl).apply {
                                     if (!status.isSuccess()) error("Background download failed: $status")
                                     bodyAsChannel().copyTo(bg.outputStream())
                                 }
-                                inputs += listOf(
-                                    "-loop",
-                                    "1",
-                                    "-t",
-                                    "%.3f".format(totalSec),
-                                    "-i",
-                                    bg.absolutePath
-                                ) // #0
+                                inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath)
                             } else {
-                                inputs += listOf(
-                                    "-f", "lavfi", "-t", "%.3f".format(totalSec),
-                                    "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps"
-                                )
+                                inputs += listOf("-f", "lavfi", "-t", "%.3f".format(totalSec),
+                                    "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps")
                             }
-                            inputs += listOf("-i", audioFile.absolutePath) // #1
+
+                            inputs += listOf("-i", audioFile.absolutePath)
                             cmd.addAll(inputs)
 
                             val sceneW = (w - panelWidthPx).coerceAtLeast(1)
@@ -409,22 +455,22 @@ fun Application.configureVideoJobsRouting() {
                             }
                         }
                     } else {
-                        val totalSec = (cues.totalMs.coerceAtLeast(1)).toDouble() / 1000.0
+                        val totalSec = (targetTotalMs.coerceAtLeast(1)).toDouble() / 1000.0
                         val inputs = mutableListOf<String>()
-                        if (req.render.background.imageUrl != null) {
+                        val preferredBgUrl = req.render.background.imageUrl
+
+                        if (preferredBgUrl != null) {
                             val bg = File(tmpDir, "bg.jpg")
-                            client.get(requireNotNull(req.render.background.imageUrl)).apply {
+                            client.get(preferredBgUrl).apply {
                                 if (!status.isSuccess()) error("Background download failed: $status")
                                 bodyAsChannel().copyTo(bg.outputStream())
                             }
-                            inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath) // #0
+                            inputs += listOf("-loop", "1", "-t", "%.3f".format(totalSec), "-i", bg.absolutePath)
                         } else {
-                            inputs += listOf(
-                                "-f", "lavfi", "-t", "%.3f".format(totalSec),
-                                "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps"
-                            )
+                            inputs += listOf("-f", "lavfi", "-t", "%.3f".format(totalSec),
+                                "-i", "color=c=$bgPadFF:s=${w}x$h:r=$fps")
                         }
-                        inputs += listOf("-i", audioFile.absolutePath) // #1
+                        inputs += listOf("-i", audioFile.absolutePath)
                         cmd.addAll(inputs)
 
                         val sceneW = (w - panelWidthPx).coerceAtLeast(1)
@@ -544,6 +590,7 @@ fun Application.configureVideoJobsRouting() {
             val exists = f.exists()
             val len = runCatching { f.length() }.getOrElse { -1L }
 
+            val log = LoggerFactory.getLogger("VideoJobs")
             log.info(
                 "[/video/jobs/{}/file] method={} remote={} ua='{}' status={} file='{}' exists={} size={}",
                 id,

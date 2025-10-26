@@ -65,9 +65,13 @@ fun Application.configureRouting() {
 
                 val outputFile = File(tempDir, "merged.mp3")
                 val ffmpegCommand = listOf(
-                    "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                    "ffmpeg", "-y",
+                    "-f", "concat", "-safe", "0",
                     "-i", listFile.absolutePath,
-                    "-c", "copy", outputFile.absolutePath
+                    "-vn",
+                    "-af", "aresample=async=1:first_pts=0",
+                    "-c:a", "libmp3lame", "-ar", "44100", "-b:a", "192k",
+                    outputFile.absolutePath
                 )
 
                 log.info("Запуск ffmpeg: ${ffmpegCommand.joinToString(" ")}")

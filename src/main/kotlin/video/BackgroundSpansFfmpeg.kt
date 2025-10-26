@@ -46,7 +46,7 @@ object BackgroundSpansFfmpeg {
         val durationsMs = buildList {
             for (i in sorted.indices) {
                 val startIdx = sorted[i].anchorIdx.coerceIn(0, cues.lastIndex)
-                val tStart = cues[startIdx].startMs
+                val tStart = if (i == 0) cues.first().startMs else cues[startIdx].startMs
                 val tEnd = if (i < sorted.lastIndex) {
                     val nextIdx = sorted[i + 1].anchorIdx.coerceIn(0, cues.lastIndex)
                     cues[nextIdx].startMs
