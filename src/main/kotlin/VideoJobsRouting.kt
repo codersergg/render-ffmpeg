@@ -80,7 +80,6 @@ fun Application.configureVideoJobsRouting() {
                         return (sec * 1000.0).toLong()
                     }
                     val audioMs = probeDurationMs(audioFile)
-                    val audioMsSafe = (audioMs - 80L).coerceAtLeast(1L)
 
                     val cues: EpisodeCuesPayload = req.render.cues ?: run {
                         val cuesUrl = requireNotNull(req.render.cuesUrl) { "cuesUrl is required when cues is null" }
@@ -107,7 +106,7 @@ fun Application.configureVideoJobsRouting() {
                         "lines count (${lines.size}) must match cues (${cues.items.size})"
                     }
 
-                    val targetTotalMs = maxOf(cues.totalMs, audioMsSafe)
+                    val targetTotalMs = maxOf(cues.totalMs, audioMs)
                     val normalizedCues: EpisodeCuesPayload = if (cues.items.isNotEmpty()) {
                         val last = cues.items.last()
                         if (last.endMs < targetTotalMs) {
@@ -355,7 +354,7 @@ fun Application.configureVideoJobsRouting() {
                                     "-filter_complex", filter,
                                     "-map", "[vout]", "-map", "$audioInputIndex:a",
                                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
-                                    "-c:a", "aac", "-b:a", "${req.render.audioBitrateKbps}k",
+                                    "-c:a", "aac", "-ar", "48000", "-b:a", "${req.render.audioBitrateKbps}k",
                                     "-movflags", "+faststart", "-shortest",
                                     outFile.absolutePath
                                 )

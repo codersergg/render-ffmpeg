@@ -33,7 +33,7 @@ fun Application.configureProbeRouting() {
                     target
                 }
 
-                val dstRate = 44100
+                val dstRate = 48000
                 val pieceSamples = mutableListOf<Long>()
                 var totalSamples = 0L
 

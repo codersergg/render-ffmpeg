@@ -85,10 +85,12 @@ fun Application.configureRouting() {
                     "-f", "concat", "-safe", "0",
                     "-i", listFile.absolutePath,
                     "-vn",
-                    "-af", "aresample=async=1:first_pts=0",
-                    "-c:a", "libmp3lame", "-ar", "44100", "-b:a", "192k",
+                    "-c:a", "libmp3lame",
+                    "-ar", "48000",
+                    "-b:a", "192k",
                     outputFile.absolutePath
                 )
+
                 log.info("Запуск ffmpeg: ${ffmpegCommand.joinToString(" ")}")
 
                 val process = ProcessBuilder(ffmpegCommand)
